@@ -1,55 +1,94 @@
 local CrowdSteering = require(script.Parent.CrowdSteering)
+local SlimeNavigation = require(script.Parent.SlimeNavigation)
 
 local SlimeAgent = {}
 SlimeAgent.__index = SlimeAgent
 
-local function horizontalDistance(a, b)
-	local delta = a - b
-	return Vector3.new(delta.X, 0, delta.Z).Magnitude
+local function horizontal(vector)
+	return Vector3.new(vector.X, 0, vector.Z)
 end
 
-function SlimeAgent.new(slot, definition, visual, spawnPoint, config)
-	local position = spawnPoint.WorldPosition
+local function horizontalDistance(a, b)
+	return horizontal(a - b).Magnitude
+end
+
+function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 	local self = setmetatable({
 		Slot = slot,
 		Definition = definition,
 		Visual = visual,
 		Model = visual.Model,
 		Config = config,
-		Position = position,
+		Position = spawnPosition,
 		Velocity = Vector3.zero,
 		Facing = Vector3.new(0, 0, 1),
 		State = "Idle",
 		TargetPlayer = nil,
-		WanderPoint = nil,
-		HomePoint = spawnPoint,
+		WanderTarget = nil,
+		HomePosition = spawnPosition,
 		IdleUntil = 0,
+		FormationSlot = nil,
+		CombatReady = false,
+		MoveTravel = 0,
+		IdleClock = (slot * 0.37) % 1,
+		Navigation = {
+			BlockedSince = nil,
+			AvoidSide = nil,
+			AvoidUntil = 0,
+			RepathAt = 0,
+			Waypoints = nil,
+			WaypointIndex = 0,
+			PathGoal = nil,
+		},
 	}, SlimeAgent)
 	return self
+end
+
+function SlimeAgent:SetCombatReady(ready)
+	ready = ready == true
+	if self.CombatReady == ready then
+		return
+	end
+	self.CombatReady = ready
+	self.Model:SetAttribute("CombatReady", ready)
 end
 
 function SlimeAgent:SetState(state, targetPlayer)
 	if self.State == state and self.TargetPlayer == targetPlayer then
 		return
 	end
+	local targetChanged = self.TargetPlayer ~= targetPlayer
 	self.State = state
 	self.TargetPlayer = targetPlayer
 	self.Model:SetAttribute("SlimeState", state)
 	self.Model:SetAttribute("TargetUserId", targetPlayer and targetPlayer.UserId or 0)
-	if state == "Chase" then
-		self.WanderPoint = nil
+
+	if state == "Chase" or state == "Engage" then
+		self.WanderTarget = nil
+	else
+		self.FormationSlot = nil
+		self:SetCombatReady(false)
+	end
+	if targetChanged then
+		SlimeNavigation.Reset(self)
 	end
 end
 
 function SlimeAgent:EnterIdle(now, randomObject)
-	self.WanderPoint = nil
+	self.WanderTarget = nil
 	self:SetState("Idle", nil)
+	SlimeNavigation.Reset(self)
 	self.IdleUntil = now + randomObject:NextNumber(self.Config.IdleMinSeconds, self.Config.IdleMaxSeconds)
 end
 
-function SlimeAgent:EnterWander(point)
-	self.WanderPoint = point
+function SlimeAgent:EnterWander(worldPosition)
+	self.WanderTarget = worldPosition
 	self:SetState("Wander", nil)
+end
+
+function SlimeAgent:EnterReturn()
+	self.WanderTarget = nil
+	self:SetState("Return", nil)
 end
 
 function SlimeAgent:DistanceTo(worldPosition)
@@ -57,39 +96,76 @@ function SlimeAgent:DistanceTo(worldPosition)
 end
 
 function SlimeAgent:Step(goal, speed, agents, zone, dt)
-	local velocity = CrowdSteering.Compute(self, goal, speed, agents, self.Config, dt)
-	local nextPosition = self.Position + velocity * dt
-	nextPosition = zone:ClampXZ(nextPosition)
-	local groundY = zone:GroundAt(nextPosition)
+	local requestedVelocity = CrowdSteering.Compute(self, goal, speed, agents, self.Config, dt)
+	local requestedPosition = self.Position + requestedVelocity * dt
+	requestedPosition = zone:ClampXZ(requestedPosition)
+	local resolvedPosition = zone:ResolveMotion(self.Position, requestedPosition)
+	resolvedPosition = zone:ClampXZ(resolvedPosition)
+
+	local groundY = zone:GroundAt(resolvedPosition)
 	if groundY then
-		nextPosition = Vector3.new(nextPosition.X, groundY, nextPosition.Z)
+		resolvedPosition = Vector3.new(resolvedPosition.X, groundY, resolvedPosition.Z)
 	else
-		nextPosition = self.Position
-		velocity = Vector3.zero
+		resolvedPosition = self.Position
 	end
 
-	self.Position = nextPosition
-	self.Velocity = velocity
-	local horizontal = Vector3.new(velocity.X, 0, velocity.Z)
-	if horizontal.Magnitude > 0.08 then
-		local desired = horizontal.Unit
+	local previous = self.Position
+	self.Position = resolvedPosition
+	local actualHorizontal = horizontal(self.Position - previous)
+	local actualVelocity = dt > 0 and actualHorizontal / dt or Vector3.zero
+	self.Velocity = actualVelocity
+
+	local moving = actualHorizontal.Magnitude > 0.002
+	local horizontalVelocity = horizontal(actualVelocity)
+	local verticalOffset = 0
+	if moving and horizontalVelocity.Magnitude > 0.08 then
+		self.MoveTravel += actualHorizontal.Magnitude
+		local stride = math.max(0.1, self.Config.MoveHopStrideStuds)
+		local phase = (self.MoveTravel / stride) * math.pi
+		verticalOffset = math.abs(math.sin(phase)) * self.Config.MoveHopHeight
+
+		local desired = horizontalVelocity.Unit
 		local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
 		local facing = self.Facing:Lerp(desired, alpha)
 		if facing.Magnitude > 0.001 then
 			self.Facing = facing.Unit
 		end
+	else
+		self.MoveTravel = 0
+		self.IdleClock += dt
+		local phase = self.IdleClock * self.Config.IdleBobCyclesPerSecond * math.pi * 2
+		verticalOffset = (0.5 + 0.5 * math.sin(phase)) * self.Config.IdleBobHeight
 	end
 
-	local pivotPosition = self.Position + Vector3.new(0, self.Visual.GroundOffset, 0)
+	if self.Visual.Animation then
+		self.Visual.Animation:SetMoving(moving)
+	end
+
+	local pivotPosition = self.Position + Vector3.new(0, self.Visual.GroundOffset + verticalOffset, 0)
 	local look = self.Facing.Magnitude > 0.001 and self.Facing or Vector3.new(0, 0, 1)
 	local frame = CFrame.lookAt(pivotPosition, pivotPosition + look)
 		* CFrame.Angles(0, math.rad(self.Config.YawOffset), 0)
 	self.Model:PivotTo(frame)
 end
 
+function SlimeAgent:FaceToward(worldPosition, dt)
+	local desired = horizontal(worldPosition - self.Position)
+	if desired.Magnitude <= 0.001 then
+		return
+	end
+	local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
+	local facing = self.Facing:Lerp(desired.Unit, alpha)
+	if facing.Magnitude > 0.001 then
+		self.Facing = facing.Unit
+	end
+end
+
 function SlimeAgent:Destroy()
 	self.TargetPlayer = nil
-	self.WanderPoint = nil
+	self.WanderTarget = nil
+	self.FormationSlot = nil
+	self:SetCombatReady(false)
+	SlimeNavigation.Reset(self)
 end
 
 return SlimeAgent

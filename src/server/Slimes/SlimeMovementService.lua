@@ -9,6 +9,8 @@ local Config = require(Shared.Config.SlimeMovement)
 
 local SlimeAgent = require(script.Parent.SlimeAgent)
 local SlimeFactory = require(script.Parent.SlimeFactory)
+local SlimeFormation = require(script.Parent.SlimeFormation)
+local SlimeNavigation = require(script.Parent.SlimeNavigation)
 local SlimeZone = require(script.Parent.SlimeZone)
 
 local SlimeMovementService = {}
@@ -21,6 +23,7 @@ local runtimeFolder = nil
 local randomObject = Random.new()
 local filterRefreshAt = 0
 local accumulator = 0
+local formationStateByPlayer = {}
 
 local function getOrCreateRuntimeFolder()
 	local existing = Workspace:FindFirstChild(Config.RuntimeFolderName)
@@ -35,6 +38,11 @@ local function getOrCreateRuntimeFolder()
 	folder.Name = Config.RuntimeFolderName
 	folder.Parent = Workspace
 	return folder
+end
+
+local function horizontalDistance(a, b)
+	local delta = a - b
+	return Vector3.new(delta.X, 0, delta.Z).Magnitude
 end
 
 local function getRoot(player)
@@ -79,62 +87,49 @@ local function chooseTarget(agent)
 	return bestPlayer
 end
 
-local function chooseWanderPoint(agent, reserved)
-	local candidates = {}
-	for _, point in ipairs(zone.Points) do
-		if not reserved[point] and point ~= agent.HomePoint then
-			table.insert(candidates, point)
-		end
-	end
-	if #candidates == 0 then
-		for _, point in ipairs(zone.Points) do
-			if not reserved[point] then
-				table.insert(candidates, point)
-			end
-		end
-	end
-	if #candidates == 0 then
-		return agent.HomePoint
-	end
-
-	-- Prefer a point that actually moves the slime, while randomizing among the
-	-- farther half so every idle cycle does not repeat the same route.
-	table.sort(candidates, function(a, b)
-		return agent:DistanceTo(a.WorldPosition) > agent:DistanceTo(b.WorldPosition)
-	end)
-	local range = math.max(1, math.ceil(#candidates * 0.5))
-	return candidates[randomObject:NextInteger(1, range)]
+local function chooseWanderTarget(agent)
+	local angle = randomObject:NextNumber(0, math.pi * 2)
+	local scale = Config.WanderMinRadiusScale
+		+ randomObject:NextNumber(0, 1) * (1 - Config.WanderMinRadiusScale)
+	local radius = Config.WanderRadius * scale
+	local target = agent.HomePosition + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+	return zone:ClampXZ(target)
 end
 
 local function updateStates(now)
-	local reserved = {}
-	for _, agent in ipairs(agents) do
-		if agent.WanderPoint then
-			reserved[agent.WanderPoint] = true
-		end
-	end
-
 	for _, agent in ipairs(agents) do
 		local target = chooseTarget(agent)
 		if target then
-			local previousPoint = agent.WanderPoint
-			if previousPoint then
-				reserved[previousPoint] = nil
+			local root = getRoot(target)
+			local ready = false
+			if root then
+				local distance = agent:DistanceTo(root.Position)
+				ready = distance <= Config.EngageReadyDistance
+					and SlimeNavigation.HasLineOfSight(agent, root.Position, zone)
 			end
-			agent:SetState("Chase", target)
-		elseif agent.State == "Chase" then
-			agent:EnterIdle(now, randomObject)
+			if ready then
+				agent:SetState("Engage", target)
+				agent:SetCombatReady(true)
+			else
+				agent:SetState("Chase", target)
+				agent:SetCombatReady(false)
+			end
+		elseif agent.State == "Chase" or agent.State == "Engage" then
+			if agent:DistanceTo(agent.HomePosition) > Config.ReturnHomeDistance then
+				agent:EnterReturn()
+			else
+				agent:EnterIdle(now, randomObject)
+			end
 		elseif agent.State == "Idle" then
 			if now >= agent.IdleUntil then
-				local point = chooseWanderPoint(agent, reserved)
-				reserved[point] = true
-				agent:EnterWander(point)
+				agent:EnterWander(chooseWanderTarget(agent))
 			end
 		elseif agent.State == "Wander" then
-			if not agent.WanderPoint or agent:DistanceTo(agent.WanderPoint.WorldPosition) <= Config.ArrivalRadius then
-				if agent.WanderPoint then
-					reserved[agent.WanderPoint] = nil
-				end
+			if not agent.WanderTarget or agent:DistanceTo(agent.WanderTarget) <= Config.ArrivalRadius then
+				agent:EnterIdle(now, randomObject)
+			end
+		elseif agent.State == "Return" then
+			if agent:DistanceTo(agent.HomePosition) <= Config.ArrivalRadius then
 				agent:EnterIdle(now, randomObject)
 			end
 		else
@@ -143,10 +138,10 @@ local function updateStates(now)
 	end
 end
 
-local function getChaseGoals()
+local function getFormationGoals(now, dt)
 	local groups = {}
 	for _, agent in ipairs(agents) do
-		if agent.State == "Chase" and agent.TargetPlayer then
+		if (agent.State == "Chase" or agent.State == "Engage") and agent.TargetPlayer then
 			groups[agent.TargetPlayer] = groups[agent.TargetPlayer] or {}
 			table.insert(groups[agent.TargetPlayer], agent)
 		end
@@ -156,20 +151,82 @@ local function getChaseGoals()
 	for player, group in pairs(groups) do
 		local root = getRoot(player)
 		if root then
-			table.sort(group, function(a, b)
-				return a.Slot < b.Slot
-			end)
-			local count = #group
-			local radius = Config.ChaseRingRadius + math.max(0, count - 1) * Config.ChaseRingSpacingBoost
-			local phase = (player.UserId % 37) / 37 * math.pi * 2
-			for index, agent in ipairs(group) do
-				local angle = phase + ((index - 1) / count) * math.pi * 2
-				local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-				goals[agent] = zone:ClampXZ(root.Position + offset)
+			local state = formationStateByPlayer[player]
+			if not state then
+				state = { NextAssignAt = 0, Heading = nil }
+				formationStateByPlayer[player] = state
+			end
+			state.Heading = SlimeFormation.ResolveHeading(root, state.Heading, dt, Config)
+			local slots = SlimeFormation.BuildSlots(root, #group, zone, Config, state.Heading)
+
+			local missingSlot = false
+			for _, agent in ipairs(group) do
+				if not agent.FormationSlot or not slots[agent.FormationSlot] then
+					missingSlot = true
+					break
+				end
+			end
+
+			if missingSlot or now >= state.NextAssignAt then
+				local assigned = SlimeFormation.Assign(group, slots, Config)
+				for agent, goal in pairs(assigned) do
+					goals[agent] = goal
+				end
+				state.NextAssignAt = now + Config.FormationReassignSeconds
+			else
+				for _, agent in ipairs(group) do
+					goals[agent] = slots[agent.FormationSlot]
+				end
 			end
 		end
 	end
+
+	for player in pairs(formationStateByPlayer) do
+		if not groups[player] then
+			formationStateByPlayer[player] = nil
+		end
+	end
 	return goals
+end
+
+local function chaseSpeedFor(agent, goal)
+	local distance = agent:DistanceTo(goal)
+	local startDistance = Config.ChaseCatchupStartDistance
+	local fullDistance = math.max(startDistance + 0.01, Config.ChaseCatchupFullDistance)
+	local alpha = math.clamp((distance - startDistance) / (fullDistance - startDistance), 0, 1)
+	return Config.ChaseSpeed + (Config.ChaseCatchupMaxSpeed - Config.ChaseSpeed) * alpha
+end
+
+local function stepAgent(agent, formationGoal, now, dt)
+	local rawGoal = agent.Position
+	local speed = 0
+	local targetRoot = agent.TargetPlayer and getRoot(agent.TargetPlayer) or nil
+
+	if agent.State == "Chase" and formationGoal then
+		rawGoal = formationGoal
+		speed = chaseSpeedFor(agent, rawGoal)
+	elseif agent.State == "Engage" and formationGoal and targetRoot then
+		local playerDistance = agent:DistanceTo(targetRoot.Position)
+		local slotDistance = agent:DistanceTo(formationGoal)
+		if playerDistance < Config.EngageInnerDistance or slotDistance > Config.FormationSlotTolerance then
+			rawGoal = formationGoal
+			speed = Config.EngageRepositionSpeed
+		else
+			agent:FaceToward(targetRoot.Position, dt)
+		end
+	elseif agent.State == "Wander" and agent.WanderTarget then
+		rawGoal = agent.WanderTarget
+		speed = Config.WanderSpeed
+	elseif agent.State == "Return" then
+		rawGoal = agent.HomePosition
+		speed = Config.ReturnSpeed
+	end
+
+	local resolvedGoal = rawGoal
+	if speed > 0 then
+		resolvedGoal = SlimeNavigation.ResolveGoal(agent, rawGoal, zone, Config, now)
+	end
+	agent:Step(resolvedGoal, speed, agents, zone, dt)
 end
 
 local function step(dt)
@@ -180,23 +237,17 @@ local function step(dt)
 	end
 
 	updateStates(now)
-	local chaseGoals = getChaseGoals()
+	local formationGoals = getFormationGoals(now, dt)
 	for _, agent in ipairs(agents) do
-		local goal, speed
-		if agent.State == "Chase" and chaseGoals[agent] then
-			goal, speed = chaseGoals[agent], Config.ChaseSpeed
-		elseif agent.State == "Wander" and agent.WanderPoint then
-			goal, speed = agent.WanderPoint.WorldPosition, Config.WanderSpeed
-		else
-			goal, speed = agent.Position, 0
-		end
-		agent:Step(goal, speed, agents, zone, dt)
+		stepAgent(agent, formationGoals[agent], now, dt)
 	end
 end
 
 local function spawnAgents()
 	local count = math.min(Config.SpawnCount, #Catalog.Variants, #zone.Points)
-	local spawnPoints = zone:GetSpreadSpawnPoints(count)
+	local spawnPositions = zone:GetInsetSpawnPositions(count, 0)
+	local authoredLoopCount = 0
+
 	for slot = 1, count do
 		local definition = Catalog.Variants[slot]
 		local visual, reason = SlimeFactory.Create(definition, slot, runtimeFolder)
@@ -204,20 +255,21 @@ local function spawnAgents()
 			warn("[Pawlands Slimes] " .. tostring(reason))
 			continue
 		end
-		if visual.AnimationReason then
-			warn("[Pawlands Slimes] Idle animation unavailable for " .. definition.Id .. ": " .. visual.AnimationReason)
+		if visual.Animation and visual.Animation:HasAuthoredLoop() then
+			authoredLoopCount += 1
 		end
 
-		local point = spawnPoints[slot]
-		local groundY = zone:GroundAt(point.WorldPosition)
-		local agent = SlimeAgent.new(slot, definition, visual, point, Config)
-		if groundY then
-			agent.Position = Vector3.new(point.WorldPosition.X, groundY, point.WorldPosition.Z)
+		local spawnPosition = spawnPositions[slot]
+		local grounded = zone:GroundPoint(spawnPosition)
+		if grounded then
+			spawnPosition = grounded
 		end
+		local agent = SlimeAgent.new(slot, definition, visual, spawnPosition, Config)
 		agent:EnterIdle(time(), randomObject)
 		agent:Step(agent.Position, 0, agents, zone, 0.001)
 		table.insert(agents, agent)
 	end
+	return authoredLoopCount
 end
 
 function SlimeMovementService.Start()
@@ -237,7 +289,7 @@ function SlimeMovementService.Start()
 		return
 	end
 	zone = resolved
-	spawnAgents()
+	local authoredLoopCount = spawnAgents()
 
 	local interval = 1 / Config.UpdateRate
 	heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
@@ -247,7 +299,11 @@ function SlimeMovementService.Start()
 			accumulator -= interval
 		end
 	end)
-	print(string.format("[Pawlands Slimes] Crowd movement ready with %d slime(s) and %d zone point(s).", #agents, #zone.Points))
+	print(string.format(
+		"[Pawlands Slimes] Crowd navigation ready with %d slime(s), square engage formation, obstacle avoidance, and %d authored animation loop(s).",
+		#agents,
+		authoredLoopCount
+	))
 end
 
 function SlimeMovementService.Stop()
@@ -264,6 +320,7 @@ function SlimeMovementService.Stop()
 		SlimeFactory.Destroy(agent.Visual)
 	end
 	table.clear(agents)
+	table.clear(formationStateByPlayer)
 	if runtimeFolder then
 		runtimeFolder:Destroy()
 	end

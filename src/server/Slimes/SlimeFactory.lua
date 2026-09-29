@@ -2,7 +2,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Catalog = require(Shared.Config.SlimeCatalog)
-local Animations = require(Shared.Config.SlimeAnimations)
+local SlimeAnimationRuntime = require(script.Parent.SlimeAnimationRuntime)
 
 local SlimeFactory = {}
 
@@ -39,28 +39,6 @@ local function configureParts(model)
 	return root
 end
 
-local function loadIdle(model)
-	local animator = model:FindFirstChildWhichIsA("Animator", true)
-	if not animator then
-		return nil, "missing Animator"
-	end
-	local animation = Instance.new("Animation")
-	animation.Name = "PawlandsSlimeIdleRuntime"
-	animation.AnimationId = Animations.Idle
-	local ok, trackOrReason = pcall(function()
-		local track = animator:LoadAnimation(animation)
-		track.Looped = true
-		track.Priority = Enum.AnimationPriority.Idle
-		track:Play(0.12)
-		return track
-	end)
-	animation:Destroy()
-	if not ok or not trackOrReason then
-		return nil, tostring(trackOrReason)
-	end
-	return trackOrReason, nil
-end
-
 function SlimeFactory.Create(definition, slot, runtimeFolder)
 	local assets = resolveAssets()
 	if not assets then
@@ -91,21 +69,21 @@ function SlimeFactory.Create(definition, slot, runtimeFolder)
 	model:SetAttribute("SlimeSlot", slot)
 	model:SetAttribute("SlimeState", "Spawn")
 	model:SetAttribute("TargetUserId", 0)
+	model:SetAttribute("CombatReady", false)
 	model.Parent = runtimeFolder
 
-	local idleTrack, animationReason = loadIdle(model)
+	local animation = SlimeAnimationRuntime.new(model)
+	animation:SetMoving(false)
 	return {
 		Model = model,
-		IdleTrack = idleTrack,
-		AnimationReason = animationReason,
+		Animation = animation,
 		GroundOffset = groundOffset,
 	}, nil
 end
 
 function SlimeFactory.Destroy(visual)
-	if visual.IdleTrack then
-		visual.IdleTrack:Stop(0.1)
-		visual.IdleTrack:Destroy()
+	if visual.Animation then
+		visual.Animation:Destroy()
 	end
 	visual.Model:Destroy()
 end
