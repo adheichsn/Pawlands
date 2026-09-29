@@ -27,12 +27,18 @@ local function loadTrack(animator, name, animationId)
 	return track
 end
 
+local function naturalDuration(track)
+	if not track or track.Length <= 0 then
+		return nil
+	end
+	return track.Length / CombatConfig.AnimationPlaybackSpeed
+end
+
 function PlayerAttackAnimator.new(animator)
 	local self = setmetatable({
 		ComboTracks = {},
 		RunningTrack = nil,
 		Current = nil,
-		PlaySerial = 0,
 	}, PlayerAttackAnimator)
 
 	for index, animationId in ipairs(CombatAnimations.M1) do
@@ -42,38 +48,40 @@ function PlayerAttackAnimator.new(animator)
 	return self
 end
 
-function PlayerAttackAnimator:_play(track, maximumSeconds)
+function PlayerAttackAnimator:_play(track)
 	if not track then
-		return false
+		return false, nil
 	end
 
-	self.PlaySerial += 1
-	local serial = self.PlaySerial
-	if self.Current and self.Current.IsPlaying then
-		self.Current:Stop(CombatConfig.AnimationFade)
+	if self.Current and self.Current ~= track and self.Current.IsPlaying then
+		self.Current:Stop(CombatConfig.AnimationTransitionFade)
+	elseif self.Current == track and track.IsPlaying then
+		track:Stop(CombatConfig.AnimationTransitionFade)
 	end
 
 	self.Current = track
-	track:Play(CombatConfig.AnimationFade, 1, CombatConfig.AnimationPlaybackSpeed)
-
-	task.delay(maximumSeconds, function()
-		if self.PlaySerial == serial and self.Current == track and track.IsPlaying then
-			track:Stop(CombatConfig.AnimationFade)
-		end
-	end)
-	return true
+	track:Play(CombatConfig.AnimationTransitionFade, 1, CombatConfig.AnimationPlaybackSpeed)
+	return true, naturalDuration(track)
 end
 
 function PlayerAttackAnimator:PlayCombo(comboIndex)
-	return self:_play(self.ComboTracks[comboIndex], CombatConfig.AnimationMaxSeconds)
+	return self:_play(self.ComboTracks[comboIndex])
 end
 
 function PlayerAttackAnimator:PlayRunning()
-	return self:_play(self.RunningTrack, CombatConfig.RunningAnimationMaxSeconds)
+	return self:_play(self.RunningTrack)
+end
+
+function PlayerAttackAnimator:StopCurrent(fadeTime)
+	local track = self.Current
+	self.Current = nil
+	if track and track.IsPlaying then
+		track:Stop(fadeTime or CombatConfig.AnimationExitFade)
+	end
 end
 
 function PlayerAttackAnimator:Destroy()
-	self.PlaySerial += 1
+	self:StopCurrent(0)
 	for _, track in pairs(self.ComboTracks) do
 		if track then
 			if track.IsPlaying then
@@ -90,7 +98,6 @@ function PlayerAttackAnimator:Destroy()
 	end
 	table.clear(self.ComboTracks)
 	self.RunningTrack = nil
-	self.Current = nil
 end
 
 return PlayerAttackAnimator

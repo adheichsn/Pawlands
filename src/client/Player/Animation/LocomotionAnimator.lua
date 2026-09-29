@@ -37,10 +37,35 @@ function LocomotionAnimator.new(humanoid, root, animator)
 		OneShotToken = 0,
 		OneShotActive = false,
 		NextIdleVariantAt = 0,
+		CombatOverride = false,
 	}, LocomotionAnimator)
 
 	self:EnterIdle()
 	return self
+end
+
+
+function LocomotionAnimator:SetCombatOverride(active, fadeTime)
+	active = active == true
+	if self.CombatOverride == active then
+		return
+	end
+
+	self.CombatOverride = active
+	self.OneShotToken += 1
+	self.OneShotActive = false
+	self.Direction = ""
+	self.WasAirborne = false
+	self.MaxDownSpeed = 0
+
+	if active then
+		self.Mode = "Combat"
+		self.Tracks:StopAll(fadeTime or Config.AnimationFade)
+	else
+		-- Force the next PreRender update to enter the locomotion state that is
+		-- actually true now instead of revealing a hidden mid-cycle walk/run pose.
+		self.Mode = ""
+	end
 end
 
 function LocomotionAnimator:ScheduleIdleVariant()
@@ -119,6 +144,9 @@ function LocomotionAnimator:Update(isRunning)
 	local humanoid = self.Humanoid
 	local root = self.Root
 	if humanoid.Health <= 0 or not root.Parent then
+		return
+	end
+	if self.CombatOverride then
 		return
 	end
 

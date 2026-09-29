@@ -7,6 +7,8 @@ local Config = require(Shared.Config.PlayerCombat)
 local MovementConfig = require(Shared.Config.PlayerMovement)
 local CombatTargeting = require(script.Parent.CombatTargeting)
 local PlayerAttackAnimator = require(script.Parent.PlayerAttackAnimator)
+local ComboFlow = require(script.Parent.ComboFlow)
+local PlayerMovementController = require(script.Parent.Parent.Player.PlayerMovementController)
 
 local PlayerCombatController = {}
 local stopCurrent
@@ -41,20 +43,22 @@ function PlayerCombatController.Start()
 	local mouse = player:GetMouse()
 	local remote = getRemote()
 	local animatorRuntime
+	local comboRuntime
 	local humanoid
 	local root
 	local character
-	local comboIndex = 0
-	local lastAttackAt = -math.huge
 
 	local function cleanupCharacter()
+		if comboRuntime then
+			comboRuntime:Destroy()
+			comboRuntime = nil
+		end
+		PlayerMovementController.SetCombatAnimationOverride(false, Config.AnimationExitFade)
 		if animatorRuntime then
 			animatorRuntime:Destroy()
 			animatorRuntime = nil
 		end
 		character, humanoid, root = nil, nil, nil
-		comboIndex = 0
-		lastAttackAt = -math.huge
 	end
 
 	local function bindCharacter(newCharacter)
@@ -64,47 +68,51 @@ function PlayerCombatController.Start()
 		root = newCharacter:WaitForChild("HumanoidRootPart")
 		local animator = humanoid:FindFirstChildOfClass("Animator") or humanoid:WaitForChild("Animator")
 		animatorRuntime = PlayerAttackAnimator.new(animator)
+
+		comboRuntime = ComboFlow.new(Config, {
+			OnChainStart = function()
+				PlayerMovementController.SetCombatAnimationOverride(true, Config.LocomotionSuppressFade)
+			end,
+			OnChainEnd = function()
+				if animatorRuntime then
+					animatorRuntime:StopCurrent(Config.AnimationExitFade)
+				end
+				PlayerMovementController.SetCombatAnimationOverride(false, Config.AnimationExitFade)
+			end,
+			OnAttack = function(kind, comboIndex)
+				local naturalSeconds
+				if animatorRuntime then
+					if kind == "Running" then
+						local _, duration = animatorRuntime:PlayRunning()
+						naturalSeconds = duration
+					else
+						local _, duration = animatorRuntime:PlayCombo(comboIndex)
+						naturalSeconds = duration
+					end
+				end
+
+				-- Damage targeting is evaluated on each staged swing, not on the raw input
+				-- press that may have been buffered earlier in the previous animation.
+				if character and root then
+					local target, aimDirection = CombatTargeting.Acquire(character, root, mouse.Target, Config)
+					if target then
+						remote:FireServer(target, aimDirection)
+					end
+				end
+				return naturalSeconds
+			end,
+		})
 	end
 
 	local function tryAttack()
-		if not character or not humanoid or not root or humanoid.Health <= 0 then
+		if not character or not humanoid or not root or humanoid.Health <= 0 or not comboRuntime then
 			return false
 		end
 		if Config.RequireGrounded and not isGrounded(humanoid) then
 			return false
 		end
 
-		local now = os.clock()
-		if now - lastAttackAt < Config.AttackCooldown then
-			return false
-		end
-		if now - lastAttackAt > Config.ComboResetSeconds then
-			comboIndex = 0
-		end
-
-		local freshChain = comboIndex == 0
-		local runningAttack = freshChain and isActivelyRunning(humanoid, root)
-		if runningAttack then
-			-- Mark the chain as started; the next click continues at M1 combo 1.
-			comboIndex = 4
-			if animatorRuntime then
-				animatorRuntime:PlayRunning()
-			end
-		else
-			comboIndex = comboIndex % 4 + 1
-			if animatorRuntime then
-				animatorRuntime:PlayCombo(comboIndex)
-			end
-		end
-		lastAttackAt = now
-
-		-- Targeting happens after the swing is accepted locally. Missing a slime is
-		-- a valid whiff, so M1 never depends on clicking a model directly.
-		local target, aimDirection = CombatTargeting.Acquire(character, root, mouse.Target, Config)
-		if target then
-			remote:FireServer(target, aimDirection)
-		end
-		return true
+		return comboRuntime:Request(isActivelyRunning(humanoid, root))
 	end
 
 	attackCurrent = tryAttack

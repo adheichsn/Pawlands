@@ -7,6 +7,10 @@ local LocomotionAnimator = require(script.Parent.Animation.LocomotionAnimator)
 
 local PlayerMovementController = {}
 local stopCurrent
+local activeLocomotion
+local activeRunToggle
+local combatOverrideActive = false
+local combatOverrideFade = nil
 
 local function disableDefaultAnimate(character)
 	local function disable(instance)
@@ -42,6 +46,7 @@ function PlayerMovementController.Start()
 			characterCleanup()
 			characterCleanup = nil
 		end
+		activeLocomotion = nil
 	end
 
 	local function bindCharacter(character)
@@ -58,6 +63,11 @@ function PlayerMovementController.Start()
 
 		humanoid.WalkSpeed = Config.WalkSpeed
 		local locomotion = LocomotionAnimator.new(humanoid, root, animator)
+		activeLocomotion = locomotion
+		if combatOverrideActive then
+			locomotion:SetCombatOverride(true, combatOverrideFade)
+		end
+
 		local updateConnection = RunService.PreRender:Connect(function()
 			locomotion:Update(runToggle and runToggle:IsRunning() or false)
 		end)
@@ -65,6 +75,9 @@ function PlayerMovementController.Start()
 		characterCleanup = function()
 			updateConnection:Disconnect()
 			animateConnection:Disconnect()
+			if activeLocomotion == locomotion then
+				activeLocomotion = nil
+			end
 			locomotion:Destroy()
 		end
 	end
@@ -76,6 +89,7 @@ function PlayerMovementController.Start()
 			humanoid.WalkSpeed = running and Config.RunSpeed or Config.WalkSpeed
 		end
 	end)
+	activeRunToggle = runToggle
 
 	local addedConnection = player.CharacterAdded:Connect(bindCharacter)
 	local removingConnection = player.CharacterRemoving:Connect(cleanupCharacter)
@@ -91,7 +105,24 @@ function PlayerMovementController.Start()
 			runToggle:Destroy()
 			runToggle = nil
 		end
+		activeRunToggle = nil
+		combatOverrideActive = false
+		combatOverrideFade = nil
 	end
+end
+
+-- Combat suppresses locomotion animation tracks only. Humanoid movement input and
+-- WalkSpeed/RunSpeed stay untouched so attacks never root the player in place.
+function PlayerMovementController.SetCombatAnimationOverride(active, fadeTime)
+	combatOverrideActive = active == true
+	combatOverrideFade = fadeTime
+	if activeLocomotion then
+		activeLocomotion:SetCombatOverride(combatOverrideActive, fadeTime)
+	end
+end
+
+function PlayerMovementController.IsRunning()
+	return activeRunToggle and activeRunToggle:IsRunning() or false
 end
 
 function PlayerMovementController.Stop()
