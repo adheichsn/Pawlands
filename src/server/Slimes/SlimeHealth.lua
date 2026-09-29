@@ -28,6 +28,8 @@ function SlimeHealth.ApplyDamage(model, amount, player)
 	if nextHealth <= 0 then
 		model:SetAttribute("Defeated", true)
 		model:SetAttribute("CombatReady", false)
+		model:SetAttribute("AttackQueued", false)
+		model:SetAttribute("AttackTurnActive", false)
 		model:SetAttribute("TargetUserId", 0)
 		model:SetAttribute("SlimeState", "Defeated")
 	end

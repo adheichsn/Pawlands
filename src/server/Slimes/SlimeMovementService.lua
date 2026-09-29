@@ -7,6 +7,7 @@ local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Catalog = require(Shared.Config.SlimeCatalog)
 local Config = require(Shared.Config.SlimeMovement)
 local CombatConfig = require(Shared.Config.SlimeCombat)
+local LifecycleConfig = require(Shared.Config.SlimeLifecycle)
 
 local SlimeAgent = require(script.Parent.SlimeAgent)
 local SlimeAttackRuntime = require(script.Parent.SlimeAttackRuntime)
@@ -16,6 +17,7 @@ local SlimeFormation = require(script.Parent.SlimeFormation)
 local SlimeNavigation = require(script.Parent.SlimeNavigation)
 local SlimeZone = require(script.Parent.SlimeZone)
 local SlimeHealth = require(script.Parent.SlimeHealth)
+local SlimeLifecycle = require(script.Parent.SlimeLifecycle)
 
 local SlimeMovementService = {}
 
@@ -28,6 +30,7 @@ local randomObject = Random.new()
 local filterRefreshAt = 0
 local accumulator = 0
 local formationStateByPlayer = {}
+local pendingRespawns = {}
 
 local function getOrCreateRuntimeFolder()
 	local existing = Workspace:FindFirstChild(Config.RuntimeFolderName)
@@ -106,6 +109,60 @@ local function disengage(agent, now)
 		agent:EnterReturn()
 	else
 		agent:EnterIdle(now, randomObject)
+	end
+end
+
+local function retireDefeatedAgents(now)
+	for index = #agents, 1, -1 do
+		local agent = agents[index]
+		if not SlimeHealth.IsAlive(agent.Model) then
+			withdrawAttackTurn(agent)
+			SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
+			agent:SetState("Defeated", nil)
+			agent:SetCombatReady(false)
+			agent.Velocity = Vector3.zero
+			if agent.Visual.Animation then
+				agent.Visual.Animation:SetMoving(false)
+			end
+
+			local lifecycle = SlimeLifecycle.Begin(agent, now, LifecycleConfig)
+			agent:Destroy()
+			table.remove(agents, index)
+			table.insert(pendingRespawns, lifecycle)
+		end
+	end
+end
+
+local function processPendingRespawns(now)
+	for index = #pendingRespawns, 1, -1 do
+		local lifecycle = pendingRespawns[index]
+		local replacement, finished, reason = SlimeLifecycle.Update(
+			lifecycle,
+			now,
+			zone,
+			agents,
+			runtimeFolder,
+			Config,
+			LifecycleConfig
+		)
+		if reason and now >= (lifecycle.NextWarnAt or 0) then
+			lifecycle.NextWarnAt = now + 5
+			warn("[Pawlands Slimes] Respawn retry: " .. tostring(reason))
+		end
+		if replacement then
+			table.insert(agents, replacement)
+			if RunService:IsStudio() then
+				print(string.format(
+					"[Pawlands Slimes] Respawned %s (slot %d, generation %d).",
+					tostring(replacement.Model:GetAttribute("SlimeId") or replacement.Model.Name),
+					replacement.Slot,
+					lifecycle.Generation
+				))
+			end
+		end
+		if finished then
+			table.remove(pendingRespawns, index)
+		end
 	end
 end
 
@@ -335,6 +392,8 @@ local function step(dt)
 		zone:RefreshGroundFilter()
 	end
 
+	retireDefeatedAgents(now)
+	processPendingRespawns(now)
 	updateStates(now)
 	local formationGoals = getFormationGoals()
 	for _, agent in ipairs(agents) do
@@ -363,6 +422,8 @@ local function spawnAgents()
 		if grounded then
 			spawnPosition = grounded
 		end
+		visual.Model:SetAttribute("RespawnGeneration", 0)
+		visual.Model:SetAttribute("RespawnPending", false)
 		local agent = SlimeAgent.new(slot, definition, visual, spawnPosition, Config)
 		agent:EnterIdle(time(), randomObject)
 		agent:Step(agent.Position, 0, agents, zone, 0.001)
@@ -399,7 +460,7 @@ function SlimeMovementService.Start()
 		end
 	end)
 	print(string.format(
-		"[Pawlands Slimes] Pawtopia AI rebase ready with %d slime(s), stable soft-square staging, FIFO tutorial pressure, and %d authored animation loop(s).",
+		"[Pawlands Slimes] Pawtopia AI + defeat/respawn lifecycle ready with %d slime(s), stable soft-square staging, FIFO tutorial pressure, and %d authored animation loop(s).",
 		#agents,
 		authoredLoopCount
 	))
@@ -420,7 +481,11 @@ function SlimeMovementService.Stop()
 		agent:Destroy()
 		SlimeFactory.Destroy(agent.Visual)
 	end
+	for _, lifecycle in ipairs(pendingRespawns) do
+		SlimeLifecycle.Cancel(lifecycle)
+	end
 	table.clear(agents)
+	table.clear(pendingRespawns)
 	table.clear(formationStateByPlayer)
 	SlimeAttackScheduler.Reset()
 	if runtimeFolder then
