@@ -1,5 +1,7 @@
 local RunService = game:GetService("RunService")
 
+local SlimeAttackScheduler = require(script.Parent.SlimeAttackScheduler)
+
 local SlimeAttackRuntime = {}
 
 local function horizontal(vector)
@@ -27,6 +29,9 @@ function SlimeAttackRuntime.Begin(agent, player, root, now, config)
 	if agent.Strike or not player or not root then
 		return false
 	end
+	if not SlimeAttackScheduler.TryClaim(agent, player, now, config) then
+		return false
+	end
 
 	local origin = agent.Position
 	local targetPosition = root.Position
@@ -47,6 +52,8 @@ function SlimeAttackRuntime.Begin(agent, player, root, now, config)
 		ImpactAt = lungeStartedAt + config.AttackImpactSeconds,
 		EndAt = lungeStartedAt + config.AttackStrikeSeconds,
 		ImpactApplied = false,
+		ReleaseGapSeconds = config.AttackGlobalGapSeconds,
+		CancelGapSeconds = config.AttackCancelGapSeconds,
 	}
 	agent:SetState("Attack", player)
 	agent:SetCombatReady(true)
@@ -56,12 +63,18 @@ function SlimeAttackRuntime.Begin(agent, player, root, now, config)
 	return true
 end
 
-function SlimeAttackRuntime.Cancel(agent)
+function SlimeAttackRuntime.Cancel(agent, now)
 	local strike = agent.Strike
 	if not strike then
 		return
 	end
 	agent.Strike = nil
+	SlimeAttackScheduler.Release(
+		agent,
+		strike.Player,
+		now or time(),
+		strike.CancelGapSeconds or 0
+	)
 	agent:RestoreGroundPose(strike.TargetPosition)
 	if agent.Visual.Animation then
 		agent.Visual.Animation:SetMoving(false)
@@ -76,12 +89,12 @@ function SlimeAttackRuntime.Update(agent, now, zone, config)
 
 	local humanoid, root = targetHumanoid(strike.Player)
 	if not humanoid or not root or not zone:Contains(root.Position) then
-		SlimeAttackRuntime.Cancel(agent)
+		SlimeAttackRuntime.Cancel(agent, now)
 		return false
 	end
 
 	if now < strike.LungeStartedAt then
-		agent:SetAttackPose(strike.Origin, 0, strike.TargetPosition)
+		agent:SetAttackPose(strike.Origin, 0, root.Position)
 		return true
 	end
 
@@ -91,7 +104,7 @@ function SlimeAttackRuntime.Update(agent, now, zone, config)
 	local desired = strike.Origin + strike.Direction * (pulse * config.AttackLungeDistance)
 	local resolved = zone:ResolveMotion(strike.Origin, zone:ClampXZ(desired))
 	local hop = pulse * config.AttackHopHeight
-	agent:SetAttackPose(resolved, hop, strike.TargetPosition)
+	agent:SetAttackPose(resolved, hop, root.Position)
 
 	if not strike.ImpactApplied and now >= strike.ImpactAt then
 		strike.ImpactApplied = true
@@ -112,6 +125,12 @@ function SlimeAttackRuntime.Update(agent, now, zone, config)
 
 	if now >= strike.EndAt then
 		agent.Strike = nil
+		SlimeAttackScheduler.Release(
+			agent,
+			strike.Player,
+			now,
+			strike.ReleaseGapSeconds or config.AttackGlobalGapSeconds
+		)
 		agent.NextAttackAt = now + config.AttackIntervalSeconds
 		agent:SetState("Engage", strike.Player)
 		agent:SetCombatReady(true)

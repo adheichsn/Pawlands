@@ -10,6 +10,7 @@ local CombatConfig = require(Shared.Config.SlimeCombat)
 
 local SlimeAgent = require(script.Parent.SlimeAgent)
 local SlimeAttackRuntime = require(script.Parent.SlimeAttackRuntime)
+local SlimeAttackScheduler = require(script.Parent.SlimeAttackScheduler)
 local SlimeFactory = require(script.Parent.SlimeFactory)
 local SlimeFormation = require(script.Parent.SlimeFormation)
 local SlimeNavigation = require(script.Parent.SlimeNavigation)
@@ -176,7 +177,7 @@ end
 local function getFormationGoals(now, dt)
 	local groups = {}
 	for _, agent in ipairs(agents) do
-		if (agent.State == "Chase" or agent.State == "Engage") and agent.TargetPlayer then
+		if (agent.State == "Chase" or agent.State == "Engage" or agent.State == "Attack") and agent.TargetPlayer then
 			groups[agent.TargetPlayer] = groups[agent.TargetPlayer] or {}
 			table.insert(groups[agent.TargetPlayer], agent)
 		end
@@ -202,7 +203,18 @@ local function getFormationGoals(now, dt)
 				end
 			end
 
-			if missingSlot or now >= state.NextAssignAt then
+			local attackActive = false
+			for _, agent in ipairs(group) do
+				if agent.State == "Attack" then
+					attackActive = true
+					break
+				end
+			end
+
+			-- Keep every combatant in the same square while one slime commits an
+			-- attack. The attacker's slot stays reserved instead of collapsing the
+			-- group from four slots to three and then rebuilding it a moment later.
+			if missingSlot or (not attackActive and now >= state.NextAssignAt) then
 				local assigned = SlimeFormation.Assign(group, slots, Config)
 				for agent, goal in pairs(assigned) do
 					goals[agent] = goal
@@ -248,6 +260,7 @@ local function stepAgent(agent, formationGoal, now, dt)
 
 	local rawGoal = agent.Position
 	local speed = 0
+	local facingGoal = nil
 	local targetRoot = agent.TargetPlayer and getRoot(agent.TargetPlayer) or nil
 
 	if agent.State == "Notice" and targetRoot then
@@ -260,6 +273,7 @@ local function stepAgent(agent, formationGoal, now, dt)
 		rawGoal = formationGoal
 		speed = chaseSpeedFor(agent, rawGoal)
 	elseif agent.State == "Engage" and formationGoal and targetRoot then
+		facingGoal = targetRoot.Position
 		if agent.CombatReady and now >= agent.NextAttackAt then
 			if SlimeAttackRuntime.Begin(agent, agent.TargetPlayer, targetRoot, now, CombatConfig) then
 				return
@@ -286,7 +300,7 @@ local function stepAgent(agent, formationGoal, now, dt)
 	if speed > 0 then
 		resolvedGoal = SlimeNavigation.ResolveGoal(agent, rawGoal, zone, Config, now)
 	end
-	agent:Step(resolvedGoal, speed, agents, zone, dt)
+	agent:Step(resolvedGoal, speed, agents, zone, dt, facingGoal)
 end
 
 local function step(dt)
@@ -382,6 +396,7 @@ function SlimeMovementService.Stop()
 	end
 	table.clear(agents)
 	table.clear(formationStateByPlayer)
+	SlimeAttackScheduler.Reset()
 	if runtimeFolder then
 		runtimeFolder:Destroy()
 	end

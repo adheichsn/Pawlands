@@ -17,6 +17,7 @@ local function isCombatState(state)
 end
 
 function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
+	visual.Model:SetAttribute("AttackTurnActive", false)
 	local self = setmetatable({
 		Slot = slot,
 		Definition = definition,
@@ -138,7 +139,7 @@ function SlimeAgent:RestoreGroundPose(targetPosition)
 	self:_applyPose(self.Position, 0, direction)
 end
 
-function SlimeAgent:Step(goal, speed, agents, zone, dt)
+function SlimeAgent:Step(goal, speed, agents, zone, dt, faceTargetPosition)
 	local requestedVelocity = CrowdSteering.Compute(self, goal, speed, agents, self.Config, dt)
 	local requestedPosition = self.Position + requestedVelocity * dt
 	requestedPosition = zone:ClampXZ(requestedPosition)
@@ -167,17 +168,36 @@ function SlimeAgent:Step(goal, speed, agents, zone, dt)
 		local phase = (self.MoveTravel / stride) * math.pi
 		verticalOffset = math.abs(math.sin(phase)) * self.Config.MoveHopHeight
 
-		local desired = horizontalVelocity.Unit
-		local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
-		local facing = self.Facing:Lerp(desired, alpha)
-		if facing.Magnitude > 0.001 then
-			self.Facing = facing.Unit
+		local desired
+		if faceTargetPosition then
+			desired = horizontal(faceTargetPosition - self.Position)
+		end
+		if not desired or desired.Magnitude <= 0.001 then
+			desired = horizontalVelocity
+		end
+		if desired.Magnitude > 0.001 then
+			desired = desired.Unit
+			local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
+			local facing = self.Facing:Lerp(desired, alpha)
+			if facing.Magnitude > 0.001 then
+				self.Facing = facing.Unit
+			end
 		end
 	else
 		self.MoveTravel = 0
 		self.IdleClock += dt
 		local phase = self.IdleClock * self.Config.IdleBobCyclesPerSecond * math.pi * 2
 		verticalOffset = (0.5 + 0.5 * math.sin(phase)) * self.Config.IdleBobHeight
+		if faceTargetPosition then
+			local desired = horizontal(faceTargetPosition - self.Position)
+			if desired.Magnitude > 0.001 then
+				local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
+				local facing = self.Facing:Lerp(desired.Unit, alpha)
+				if facing.Magnitude > 0.001 then
+					self.Facing = facing.Unit
+				end
+			end
+		end
 	end
 
 	if self.Visual.Animation then

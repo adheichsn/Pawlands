@@ -3,9 +3,8 @@ local function asset(id)
 end
 
 -- Player combat animation ids are config-owned through Rojo, matching the
--- existing Pawlands player locomotion setup. Stage 2A.1 only plays the M1
--- combo tracks; the remaining authored ids are recorded now for later combat
--- stages without enabling their mechanics early.
+-- existing Pawlands player locomotion setup. M1 and the four light hit reactions
+-- are active; heavier/downed/death reactions remain recorded for later stages.
 return table.freeze({
 	M1 = table.freeze({
 		asset(140339096811792),
@@ -22,8 +21,24 @@ return table.freeze({
 		ParryLanded2 = asset(134317187298546),
 	}),
 	HitReact = table.freeze({
-		Light = asset(109853540223703),
-		Heavy = asset(130045849776111),
-		KnockbackHeavy = asset(105715760605141),
+		Light = table.freeze({
+			asset(116548055206847),
+			asset(104433339910626),
+			asset(114542854566053),
+			asset(113094119830949),
+		}),
+		Middle = asset(138000361507127),
+		GettingHitDowned = asset(74258197039998),
+		Died = asset(70862108895485),
+		Downed = asset(140411658400790),
+		GettingUp = asset(89333160354969),
+		Stunned = asset(140545505487737),
+
+		-- Earlier authored reactions stay recorded for future heavy/knockback work.
+		Legacy = table.freeze({
+			Light = asset(109853540223703),
+			Heavy = asset(130045849776111),
+			KnockbackHeavy = asset(105715760605141),
+		}),
 	}),
 })

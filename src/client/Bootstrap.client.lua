@@ -1,12 +1,15 @@
 local PetFollowController = require(script.Parent.Pets.PetFollowController)
 local PlayerMovementController = require(script.Parent.Player.PlayerMovementController)
 local PlayerCombatController = require(script.Parent.Combat.PlayerCombatController)
+local PlayerHitReactionController = require(script.Parent.Combat.PlayerHitReactionController)
 
 PetFollowController.Start()
 PlayerMovementController.Start()
 PlayerCombatController.Start()
+PlayerHitReactionController.Start()
 
 script.Destroying:Connect(function()
+	PlayerHitReactionController.Stop()
 	PlayerCombatController.Stop()
 	PlayerMovementController.Stop()
 	PetFollowController.Stop()

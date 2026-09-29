@@ -13,6 +13,14 @@ local PlayerCombat = {
 	AnimationFadeSeconds = 0.08,
 	AnimationPriority = Enum.AnimationPriority.Action,
 
+	HitReaction = table.freeze({
+		FadeSeconds = 0.05,
+		PlaybackSpeed = 1.08,
+		MaxVisibleSeconds = 0.42,
+		RetriggerCooldownSeconds = 0.18,
+		AnimationPriority = Enum.AnimationPriority.Action2,
+	}),
+
 	RequireGrounded = true,
 	RequireLineOfSight = true,
 
