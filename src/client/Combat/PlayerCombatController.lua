@@ -70,7 +70,7 @@ function PlayerCombatController.Start()
 					return
 				end
 
-				if kind == "Running" then
+				if kind == Config.ActionTypes.RunningAttack then
 					animatorRuntime:PlayRunning()
 				else
 					animatorRuntime:PlayCombo(comboIndex)

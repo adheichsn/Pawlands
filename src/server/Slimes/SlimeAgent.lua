@@ -18,6 +18,7 @@ end
 
 function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 	visual.Model:SetAttribute("AttackTurnActive", false)
+	visual.Model:SetAttribute("AttackQueued", false)
 	local self = setmetatable({
 		Slot = slot,
 		Definition = definition,
@@ -78,6 +79,9 @@ function SlimeAgent:SetState(state, targetPlayer)
 		self:SetCombatReady(false)
 	end
 	if targetChanged then
+		-- A new target gets a fresh stable staging assignment. Keeping the old
+		-- slot across targets can force a cross-player orbit on the first frame.
+		self.FormationSlot = nil
 		SlimeNavigation.Reset(self)
 	end
 end
@@ -171,6 +175,9 @@ function SlimeAgent:Step(goal, speed, agents, zone, dt, faceTargetPosition)
 		local desired
 		if faceTargetPosition then
 			desired = horizontal(faceTargetPosition - self.Position)
+			if desired.Magnitude <= self.Config.CombatFacingDeadzone then
+				desired = nil
+			end
 		end
 		if not desired or desired.Magnitude <= 0.001 then
 			desired = horizontalVelocity
@@ -190,7 +197,7 @@ function SlimeAgent:Step(goal, speed, agents, zone, dt, faceTargetPosition)
 		verticalOffset = (0.5 + 0.5 * math.sin(phase)) * self.Config.IdleBobHeight
 		if faceTargetPosition then
 			local desired = horizontal(faceTargetPosition - self.Position)
-			if desired.Magnitude > 0.001 then
+			if desired.Magnitude > self.Config.CombatFacingDeadzone then
 				local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
 				local facing = self.Facing:Lerp(desired.Unit, alpha)
 				if facing.Magnitude > 0.001 then
@@ -208,7 +215,7 @@ end
 
 function SlimeAgent:FaceToward(worldPosition, dt)
 	local desired = horizontal(worldPosition - self.Position)
-	if desired.Magnitude <= 0.001 then
+	if desired.Magnitude <= self.Config.CombatFacingDeadzone then
 		return
 	end
 	local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)

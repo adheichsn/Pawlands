@@ -17,11 +17,11 @@ return table.freeze({
 	ChaseCatchupMaxSpeed = 11.5,
 	ChaseCatchupStartDistance = 10,
 	ChaseCatchupFullDistance = 24,
-	EngageRepositionSpeed = 6.0,
+	EngageRepositionSpeed = 5.4,
 	ReturnSpeed = 8.8,
-	IdleSeparationSpeed = 2.25,
+	IdleSeparationSpeed = 2.8,
 	Acceleration = 11,
-	TurnSpeed = 12,
+	TurnSpeed = 10,
 	ArrivalRadius = 1.15,
 
 	IdleMinSeconds = 2.5,
@@ -32,29 +32,29 @@ return table.freeze({
 	WanderMinRadiusScale = 0.35,
 	ReturnHomeDistance = 2.5,
 
-	AggroRange = 34,
-	DisengageRange = 44,
+	-- Tutorial actors may pursue anywhere inside the authored CombatZone. Arena
+	-- containment, rather than a small aggro circle, owns tutorial targeting.
+	AggroRange = math.huge,
+	DisengageRange = math.huge,
 
-	-- Four engaged slimes use a stable square footprint around the player:
-	-- front / right / back / left. A slime becomes combat-ready from range +
-	-- line-of-sight; it never has to finish walking to its exact slot first.
+	-- Four engaged slimes keep a stable square staging footprint. The square
+	-- translates with the Player but does not rotate from Player velocity every
+	-- frame. It is a soft staging guide, not a hard orbit that forces backpedaling.
 	EngageRadius = 7.0,
 	EngageInnerDistance = 5.25,
-	EngageReadyDistance = 8.75,
-	FormationPredictionSeconds = 0.16,
-	FormationVelocityThreshold = 1.5,
-	FormationHeadingSmoothing = 5.5,
-	FormationReassignSeconds = 0.30,
+	EngageReadyDistance = 8.5,
+	SoftStageReleaseDistance = 8.25,
+	SoftStageMaxDrift = 3.35,
 	FormationSwitchPenalty = 3.0,
 	FormationSlotTolerance = 1.35,
+	CombatFacingDeadzone = 0.28,
 
-	-- Crowd steering is independent from physical collision. Runtime slime parts
-	-- stay non-collidable while these logical radii prevent visual stacking.
-	SeparationRadius = 6.5,
-	HardSeparationRadius = 4.0,
-	SeparationWeight = 10,
-	HardSeparationWeight = 22,
-	SeparationLookahead = 0.25,
+	-- Pawtopia-style bounded separation: keep visible spacing without letting
+	-- crowd correction drag a slime far away from its intended combat position.
+	SeparationRadius = 5.35,
+	SeparationCorrectionStrength = 0.95,
+	SeparationMaxCorrectionStuds = 2.10,
+	SeparationRepositionThreshold = 0.22,
 
 	-- Local obstacle avoidance runs every movement step. It first steers around a
 	-- blocking surface and only asks PathfindingService for waypoints after the

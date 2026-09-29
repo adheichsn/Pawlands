@@ -16,25 +16,14 @@ local function fallbackForward(root)
 	return Vector3.new(0, 0, -1)
 end
 
-function SlimeFormation.ResolveHeading(root, previousHeading, dt, config)
-	local velocity = horizontal(root.AssemblyLinearVelocity)
-	local desired = nil
-	if velocity.Magnitude >= config.FormationVelocityThreshold then
-		desired = velocity.Unit
-	elseif previousHeading and previousHeading.Magnitude > 0.001 then
-		-- Keep the previous combat heading while the player is stationary. This
-		-- prevents the whole square from orbiting just because the avatar rotates.
-		return previousHeading.Unit
-	else
-		desired = fallbackForward(root)
+-- The combat square keeps the heading captured at engagement. Player velocity
+-- no longer rotates the formation every frame, which previously made slimes
+-- orbit and cross through one another when the Player simply moved forward.
+function SlimeFormation.ResolveHeading(root, previousHeading)
+	if previousHeading and previousHeading.Magnitude > 0.001 then
+		return horizontal(previousHeading).Unit
 	end
-
-	if not previousHeading or previousHeading.Magnitude <= 0.001 then
-		return desired
-	end
-	local alpha = 1 - math.exp(-config.FormationHeadingSmoothing * math.max(0, dt))
-	local blended = previousHeading:Lerp(desired, alpha)
-	return blended.Magnitude > 0.001 and blended.Unit or desired
+	return fallbackForward(root)
 end
 
 local function getDirections(count, forward, right)
@@ -49,8 +38,6 @@ local function getDirections(count, forward, right)
 		local backLeft = (-forward - right).Unit
 		return { forward, backRight, backLeft }
 	end
-	-- Four slimes form the requested square footprint around the player. Viewed
-	-- from above, the points are front/right/back/left (a rotated square).
 	return { forward, right, -forward, -right }
 end
 
@@ -62,8 +49,7 @@ function SlimeFormation.BuildSlots(root, count, zone, config, heading)
 		forward = forward.Unit
 	end
 	local right = Vector3.new(-forward.Z, 0, forward.X)
-	local velocity = horizontal(root.AssemblyLinearVelocity)
-	local anchor = root.Position + velocity * config.FormationPredictionSeconds
+	local anchor = root.Position
 	local directions = getDirections(count, forward, right)
 	local slots = table.create(#directions)
 
@@ -83,9 +69,9 @@ local function assignmentCost(agent, slotIndex, slotPosition, config)
 	return cost
 end
 
--- Groups are intentionally tiny (maximum four), so evaluating every slot
--- permutation is cheap and avoids the visible crossing that a greedy assignment
--- can produce when slimes approach the player from opposite sides.
+-- Groups are tiny (maximum four), so exhaustive assignment is cheap. Assignment
+-- is only repeated when membership/target changes; active combat does not churn
+-- slots every few tenths of a second.
 function SlimeFormation.Assign(group, slots, config)
 	local count = math.min(#group, #slots)
 	if count <= 0 then

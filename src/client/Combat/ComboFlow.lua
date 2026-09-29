@@ -30,7 +30,7 @@ end
 function ComboFlow:_resolveAction(now, running)
 	local comboExpired = now - self.LastAttackAt > self.Config.ComboResetSeconds
 	if running and comboExpired then
-		return "Running", 0, self.Config.RunningAttack
+		return self.Config.ActionTypes.RunningAttack, 0, self.Config.RunningAttack
 	end
 
 	if comboExpired or self.ComboIndex <= 0 then
@@ -38,7 +38,7 @@ function ComboFlow:_resolveAction(now, running)
 	else
 		self.ComboIndex = (self.ComboIndex % #self.Config.Combo) + 1
 	end
-	return "Combo", self.ComboIndex, self.Config.Combo[self.ComboIndex]
+	return self.Config.ActionTypes.M1, self.ComboIndex, self.Config.Combo[self.ComboIndex]
 end
 
 function ComboFlow:_commit(now, running)

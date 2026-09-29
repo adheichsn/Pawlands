@@ -95,8 +95,13 @@ local function chooseWanderTarget(agent)
 	return zone:ClampXZ(target)
 end
 
+local function withdrawAttackTurn(agent)
+	SlimeAttackScheduler.Withdraw(agent)
+end
+
 local function disengage(agent, now)
-	SlimeAttackRuntime.Cancel(agent)
+	withdrawAttackTurn(agent)
+	SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
 	if agent:DistanceTo(agent.HomePosition) > Config.ReturnHomeDistance then
 		agent:EnterReturn()
 	else
@@ -107,7 +112,8 @@ end
 local function updateStates(now)
 	for _, agent in ipairs(agents) do
 		if not SlimeHealth.IsAlive(agent.Model) then
-			SlimeAttackRuntime.Cancel(agent)
+			withdrawAttackTurn(agent)
+			SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
 			agent:SetState("Defeated", nil)
 			agent:SetCombatReady(false)
 			continue
@@ -129,11 +135,13 @@ local function updateStates(now)
 				or agent.State == "Wander"
 				or agent.State == "Return"
 			then
+				withdrawAttackTurn(agent)
 				agent:EnterNotice(target, now, CombatConfig)
 				continue
 			end
 
 			if agent.State == "Notice" then
+				withdrawAttackTurn(agent)
 				if now >= agent.NoticeUntil then
 					agent:SetState("Chase", target)
 				end
@@ -151,30 +159,35 @@ local function updateStates(now)
 				agent:SetState("Engage", target)
 				agent:SetCombatReady(true)
 			else
+				withdrawAttackTurn(agent)
 				agent:SetState("Chase", target)
 				agent:SetCombatReady(false)
 			end
 		elseif agent.State == "Notice" or agent.State == "Chase" or agent.State == "Engage" then
 			disengage(agent, now)
 		elseif agent.State == "Idle" then
+			withdrawAttackTurn(agent)
 			if now >= agent.IdleUntil then
 				agent:EnterWander(chooseWanderTarget(agent))
 			end
 		elseif agent.State == "Wander" then
+			withdrawAttackTurn(agent)
 			if not agent.WanderTarget or agent:DistanceTo(agent.WanderTarget) <= Config.ArrivalRadius then
 				agent:EnterIdle(now, randomObject)
 			end
 		elseif agent.State == "Return" then
+			withdrawAttackTurn(agent)
 			if agent:DistanceTo(agent.HomePosition) <= Config.ArrivalRadius then
 				agent:EnterIdle(now, randomObject)
 			end
 		else
+			withdrawAttackTurn(agent)
 			agent:EnterIdle(now, randomObject)
 		end
 	end
 end
 
-local function getFormationGoals(now, dt)
+local function getFormationGoals()
 	local groups = {}
 	for _, agent in ipairs(agents) do
 		if (agent.State == "Chase" or agent.State == "Engage" or agent.State == "Attack") and agent.TargetPlayer then
@@ -189,37 +202,32 @@ local function getFormationGoals(now, dt)
 		if root then
 			local state = formationStateByPlayer[player]
 			if not state then
-				state = { NextAssignAt = 0, Heading = nil }
+				state = {
+					Heading = SlimeFormation.ResolveHeading(root, nil),
+					LastCount = 0,
+				}
 				formationStateByPlayer[player] = state
+			else
+				state.Heading = SlimeFormation.ResolveHeading(root, state.Heading)
 			end
-			state.Heading = SlimeFormation.ResolveHeading(root, state.Heading, dt, Config)
+
 			local slots = SlimeFormation.BuildSlots(root, #group, zone, Config, state.Heading)
-
-			local missingSlot = false
-			for _, agent in ipairs(group) do
-				if not agent.FormationSlot or not slots[agent.FormationSlot] then
-					missingSlot = true
-					break
+			local needsAssignment = state.LastCount ~= #group
+			if not needsAssignment then
+				for _, agent in ipairs(group) do
+					if not agent.FormationSlot or not slots[agent.FormationSlot] then
+						needsAssignment = true
+						break
+					end
 				end
 			end
 
-			local attackActive = false
-			for _, agent in ipairs(group) do
-				if agent.State == "Attack" then
-					attackActive = true
-					break
-				end
-			end
-
-			-- Keep every combatant in the same square while one slime commits an
-			-- attack. The attacker's slot stays reserved instead of collapsing the
-			-- group from four slots to three and then rebuilding it a moment later.
-			if missingSlot or (not attackActive and now >= state.NextAssignAt) then
+			if needsAssignment then
 				local assigned = SlimeFormation.Assign(group, slots, Config)
 				for agent, goal in pairs(assigned) do
 					goals[agent] = goal
 				end
-				state.NextAssignAt = now + Config.FormationReassignSeconds
+				state.LastCount = #group
 			else
 				for _, agent in ipairs(group) do
 					goals[agent] = slots[agent.FormationSlot]
@@ -264,36 +272,53 @@ local function stepAgent(agent, formationGoal, now, dt)
 	local targetRoot = agent.TargetPlayer and getRoot(agent.TargetPlayer) or nil
 
 	if agent.State == "Notice" and targetRoot then
+		withdrawAttackTurn(agent)
 		agent:FaceToward(targetRoot.Position, dt)
 		if agent.Visual.Animation then
 			agent.Visual.Animation:SetMoving(false)
 		end
 		return
-	elseif agent.State == "Chase" and formationGoal then
+	elseif agent.State == "Chase" and formationGoal and targetRoot then
+		withdrawAttackTurn(agent)
 		rawGoal = formationGoal
 		speed = chaseSpeedFor(agent, rawGoal)
+		facingGoal = targetRoot.Position
 	elseif agent.State == "Engage" and formationGoal and targetRoot then
 		facingGoal = targetRoot.Position
 		if agent.CombatReady and now >= agent.NextAttackAt then
 			if SlimeAttackRuntime.Begin(agent, agent.TargetPlayer, targetRoot, now, CombatConfig) then
 				return
 			end
+		else
+			withdrawAttackTurn(agent)
 		end
 
 		local playerDistance = agent:DistanceTo(targetRoot.Position)
 		local slotDistance = agent:DistanceTo(formationGoal)
-		if playerDistance < Config.EngageInnerDistance or slotDistance > Config.FormationSlotTolerance then
+		-- Pawtopia tutorial rule: if the Player walks into a slime, do not backpedal
+		-- just to restore the full staging shell. Hold the achieved position, keep
+		-- facing the Player, and let bounded separation resolve peer overlap.
+		if playerDistance > Config.SoftStageReleaseDistance then
+			rawGoal = formationGoal
+			speed = Config.EngageRepositionSpeed
+		elseif playerDistance > Config.EngageInnerDistance
+			and slotDistance > Config.SoftStageMaxDrift then
 			rawGoal = formationGoal
 			speed = Config.EngageRepositionSpeed
 		else
-			agent:FaceToward(targetRoot.Position, dt)
+			rawGoal = agent.Position
+			speed = 0
 		end
 	elseif agent.State == "Wander" and agent.WanderTarget then
+		withdrawAttackTurn(agent)
 		rawGoal = agent.WanderTarget
 		speed = Config.WanderSpeed
 	elseif agent.State == "Return" then
+		withdrawAttackTurn(agent)
 		rawGoal = agent.HomePosition
 		speed = Config.ReturnSpeed
+	else
+		withdrawAttackTurn(agent)
 	end
 
 	local resolvedGoal = rawGoal
@@ -311,7 +336,7 @@ local function step(dt)
 	end
 
 	updateStates(now)
-	local formationGoals = getFormationGoals(now, dt)
+	local formationGoals = getFormationGoals()
 	for _, agent in ipairs(agents) do
 		stepAgent(agent, formationGoals[agent], now, dt)
 	end
@@ -374,7 +399,7 @@ function SlimeMovementService.Start()
 		end
 	end)
 	print(string.format(
-		"[Pawlands Slimes] Pawtopia-style notice/chase/strike loop ready with %d slime(s), square formation, obstacle avoidance, and %d authored animation loop(s).",
+		"[Pawlands Slimes] Pawtopia AI rebase ready with %d slime(s), stable soft-square staging, FIFO tutorial pressure, and %d authored animation loop(s).",
 		#agents,
 		authoredLoopCount
 	))
@@ -390,7 +415,8 @@ function SlimeMovementService.Stop()
 		heartbeatConnection = nil
 	end
 	for _, agent in ipairs(agents) do
-		SlimeAttackRuntime.Cancel(agent)
+		SlimeAttackScheduler.Withdraw(agent)
+		SlimeAttackRuntime.Cancel(agent, time(), CombatConfig)
 		agent:Destroy()
 		SlimeFactory.Destroy(agent.Visual)
 	end
