@@ -12,6 +12,7 @@ local CombatValidation = require(script.Parent.CombatValidation)
 local CombatService = {}
 local started = false
 local attackConnection
+local removingConnection
 local lastAttackByPlayer = {}
 
 local function ensureRemote()
@@ -40,7 +41,7 @@ local function runtimeFolder()
 	return folder and folder:IsA("Folder") and folder or nil
 end
 
-local function processAttack(player, target)
+local function processAttack(player, target, aimDirection)
 	local now = os.clock()
 	local previous = lastAttackByPlayer[player] or -math.huge
 	if now - previous < Config.AttackCooldown then
@@ -62,12 +63,15 @@ local function processAttack(player, target)
 	if not CombatValidation.InRange(playerState.Root, target, Config.AttackRange) then
 		return
 	end
+	if not CombatValidation.InAim(playerState.Root, target, aimDirection, Config) then
+		return
+	end
 	if Config.RequireLineOfSight
 		and not CombatValidation.HasLineOfSight(playerState.Character, target, folder) then
 		return
 	end
 
-	-- Consume cooldown only after all authoritative checks pass.
+	-- Consume cooldown only after every authoritative hit check passes.
 	lastAttackByPlayer[player] = now
 	local applied, health = SlimeHealth.ApplyDamage(target, Config.Damage, player)
 	if applied and RunService:IsStudio() then
@@ -89,7 +93,7 @@ function CombatService.Start()
 	started = true
 	local remote = ensureRemote()
 	attackConnection = remote.OnServerEvent:Connect(processAttack)
-	Players.PlayerRemoving:Connect(function(player)
+	removingConnection = Players.PlayerRemoving:Connect(function(player)
 		lastAttackByPlayer[player] = nil
 	end)
 end
@@ -102,6 +106,10 @@ function CombatService.Stop()
 	if attackConnection then
 		attackConnection:Disconnect()
 		attackConnection = nil
+	end
+	if removingConnection then
+		removingConnection:Disconnect()
+		removingConnection = nil
 	end
 	table.clear(lastAttackByPlayer)
 end

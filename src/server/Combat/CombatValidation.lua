@@ -15,6 +15,18 @@ local function characterState(player)
 	return character, humanoid, root
 end
 
+local function horizontalUnit(vector)
+	local flat = Vector3.new(vector.X, 0, vector.Z)
+	if flat.Magnitude <= 1e-4 then
+		return nil
+	end
+	return flat.Unit
+end
+
+local function withinAngle(a, b, maximumDegrees)
+	return math.deg(math.acos(math.clamp(a:Dot(b), -1, 1))) <= maximumDegrees
+end
+
 function CombatValidation.ValidatePlayer(player, config)
 	local character, humanoid, root = characterState(player)
 	if not character then
@@ -43,6 +55,20 @@ function CombatValidation.InRange(root, target, range)
 	local delta = target:GetPivot().Position - root.Position
 	local horizontal = Vector3.new(delta.X, 0, delta.Z)
 	return horizontal.Magnitude <= range
+end
+
+function CombatValidation.InAim(root, target, aimDirection, config)
+	if typeof(aimDirection) ~= "Vector3" then
+		return false
+	end
+	local aim = horizontalUnit(aimDirection)
+	local targetDirection = horizontalUnit(target:GetPivot().Position - root.Position)
+	local rootDirection = horizontalUnit(root.CFrame.LookVector)
+	if not aim or not targetDirection or not rootDirection then
+		return false
+	end
+	return withinAngle(aim, targetDirection, config.ServerAimHalfAngleDegrees)
+		and withinAngle(rootDirection, targetDirection, config.ServerRootHalfAngleDegrees)
 end
 
 function CombatValidation.HasLineOfSight(character, target, runtimeFolder)
