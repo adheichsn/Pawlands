@@ -3,6 +3,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Catalog = require(Shared.Config.SlimeCatalog)
 local SlimeAnimationRuntime = require(script.Parent.SlimeAnimationRuntime)
+local SlimeHealth = require(script.Parent.SlimeHealth)
 
 local SlimeFactory = {}
 
@@ -70,6 +71,7 @@ function SlimeFactory.Create(definition, slot, runtimeFolder)
 	model:SetAttribute("SlimeState", "Spawn")
 	model:SetAttribute("TargetUserId", 0)
 	model:SetAttribute("CombatReady", false)
+	SlimeHealth.Initialize(model)
 	model.Parent = runtimeFolder
 
 	local animation = SlimeAnimationRuntime.new(model)

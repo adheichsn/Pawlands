@@ -12,6 +12,7 @@ local SlimeFactory = require(script.Parent.SlimeFactory)
 local SlimeFormation = require(script.Parent.SlimeFormation)
 local SlimeNavigation = require(script.Parent.SlimeNavigation)
 local SlimeZone = require(script.Parent.SlimeZone)
+local SlimeHealth = require(script.Parent.SlimeHealth)
 
 local SlimeMovementService = {}
 
@@ -98,6 +99,11 @@ end
 
 local function updateStates(now)
 	for _, agent in ipairs(agents) do
+		if not SlimeHealth.IsAlive(agent.Model) then
+			agent:SetState("Defeated", nil)
+			agent:SetCombatReady(false)
+			continue
+		end
 		local target = chooseTarget(agent)
 		if target then
 			local root = getRoot(target)
@@ -198,6 +204,14 @@ local function chaseSpeedFor(agent, goal)
 end
 
 local function stepAgent(agent, formationGoal, now, dt)
+	if not SlimeHealth.IsAlive(agent.Model) then
+		agent.Velocity = Vector3.zero
+		if agent.Visual.Animation then
+			agent.Visual.Animation:SetMoving(false)
+		end
+		return
+	end
+
 	local rawGoal = agent.Position
 	local speed = 0
 	local targetRoot = agent.TargetPlayer and getRoot(agent.TargetPlayer) or nil
