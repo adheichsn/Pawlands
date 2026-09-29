@@ -27,13 +27,6 @@ local function loadTrack(animator, name, animationId)
 	return track
 end
 
-local function naturalDuration(track)
-	if not track or track.Length <= 0 then
-		return nil
-	end
-	return track.Length / CombatConfig.AnimationPlaybackSpeed
-end
-
 function PlayerAttackAnimator.new(animator)
 	local self = setmetatable({
 		ComboTracks = {},
@@ -48,52 +41,44 @@ function PlayerAttackAnimator.new(animator)
 	return self
 end
 
-function PlayerAttackAnimator:_play(track)
+function PlayerAttackAnimator:_play(track, speed)
 	if not track then
-		return false, nil
+		return false
 	end
 
+	local fade = CombatConfig.AnimationFadeSeconds
 	if self.Current and self.Current ~= track and self.Current.IsPlaying then
-		self.Current:Stop(CombatConfig.AnimationTransitionFade)
+		self.Current:Stop(fade)
 	elseif self.Current == track and track.IsPlaying then
-		track:Stop(CombatConfig.AnimationTransitionFade)
+		track:Stop(0)
 	end
 
 	self.Current = track
-	track:Play(CombatConfig.AnimationTransitionFade, 1, CombatConfig.AnimationPlaybackSpeed)
-	return true, naturalDuration(track)
+	track:Play(fade, 1, speed or 1)
+	return true
 end
 
 function PlayerAttackAnimator:PlayCombo(comboIndex)
-	return self:_play(self.ComboTracks[comboIndex])
+	local track = self.ComboTracks[comboIndex]
+	return self:_play(track, CombatConfig.GetComboPlaybackSpeed(comboIndex, track and track.Length))
 end
 
 function PlayerAttackAnimator:PlayRunning()
-	return self:_play(self.RunningTrack)
-end
-
-function PlayerAttackAnimator:StopCurrent(fadeTime)
-	local track = self.Current
-	self.Current = nil
-	if track and track.IsPlaying then
-		track:Stop(fadeTime or CombatConfig.AnimationExitFade)
-	end
+	local track = self.RunningTrack
+	return self:_play(track, CombatConfig.GetRunningPlaybackSpeed(track and track.Length))
 end
 
 function PlayerAttackAnimator:Destroy()
-	self:StopCurrent(0)
+	if self.Current and self.Current.IsPlaying then
+		self.Current:Stop(0)
+	end
+	self.Current = nil
 	for _, track in pairs(self.ComboTracks) do
 		if track then
-			if track.IsPlaying then
-				track:Stop(0)
-			end
 			track:Destroy()
 		end
 	end
 	if self.RunningTrack then
-		if self.RunningTrack.IsPlaying then
-			self.RunningTrack:Stop(0)
-		end
 		self.RunningTrack:Destroy()
 	end
 	table.clear(self.ComboTracks)

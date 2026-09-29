@@ -15,7 +15,18 @@ local function characterState(player)
 	return character, humanoid, root
 end
 
+local function finiteVector(vector)
+	return typeof(vector) == "Vector3"
+		and vector.X == vector.X and vector.Y == vector.Y and vector.Z == vector.Z
+		and math.abs(vector.X) < math.huge
+		and math.abs(vector.Y) < math.huge
+		and math.abs(vector.Z) < math.huge
+end
+
 local function horizontalUnit(vector)
+	if not finiteVector(vector) then
+		return nil
+	end
 	local flat = Vector3.new(vector.X, 0, vector.Z)
 	if flat.Magnitude <= 1e-4 then
 		return nil
@@ -23,8 +34,8 @@ local function horizontalUnit(vector)
 	return flat.Unit
 end
 
-local function withinAngle(a, b, maximumDegrees)
-	return math.deg(math.acos(math.clamp(a:Dot(b), -1, 1))) <= maximumDegrees
+local function angleDegrees(a, b)
+	return math.deg(math.acos(math.clamp(a:Dot(b), -1, 1)))
 end
 
 function CombatValidation.ValidatePlayer(player, config)
@@ -51,29 +62,35 @@ function CombatValidation.ValidateTarget(target, runtimeFolder, slimeHealth)
 	return true, nil
 end
 
-function CombatValidation.InRange(root, target, range)
-	local delta = target:GetPivot().Position - root.Position
-	local horizontal = Vector3.new(delta.X, 0, delta.Z)
-	return horizontal.Magnitude <= range
+function CombatValidation.ResolveAim(root, requestedDirection, config)
+	local rootDirection = horizontalUnit(root.CFrame.LookVector) or Vector3.new(0, 0, -1)
+	local requested = horizontalUnit(requestedDirection)
+	if not requested then
+		return rootDirection
+	end
+	if angleDegrees(rootDirection, requested) > config.ServerAimRootMaxDegrees then
+		return rootDirection
+	end
+	return requested
 end
 
-function CombatValidation.InAim(root, target, aimDirection, config)
-	if typeof(aimDirection) ~= "Vector3" then
+function CombatValidation.IsRunningAttackValid(playerState, config)
+	local root = playerState.Root
+	local humanoid = playerState.Humanoid
+	if humanoid.MoveDirection.Magnitude <= 0.10 then
 		return false
 	end
-	local aim = horizontalUnit(aimDirection)
-	local targetDirection = horizontalUnit(target:GetPivot().Position - root.Position)
-	local rootDirection = horizontalUnit(root.CFrame.LookVector)
-	if not aim or not targetDirection or not rootDirection then
-		return false
-	end
-	return withinAngle(aim, targetDirection, config.ServerAimHalfAngleDegrees)
-		and withinAngle(rootDirection, targetDirection, config.ServerRootHalfAngleDegrees)
+	local velocity = root.AssemblyLinearVelocity
+	local speed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	return speed >= config.RunningAttack.ServerMinimumHorizontalSpeedStuds
 end
 
 function CombatValidation.HasLineOfSight(character, target, runtimeFolder)
 	local origin = character:FindFirstChild("Head")
 	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root then
+		return false
+	end
 	local start = origin and origin.Position or root.Position
 	local goal = target:GetPivot().Position
 	local params = RaycastParams.new()

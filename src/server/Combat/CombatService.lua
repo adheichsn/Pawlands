@@ -8,12 +8,13 @@ local Config = require(Shared.Config.PlayerCombat)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local SlimeHealth = require(script.Parent.Parent.Slimes.SlimeHealth)
 local CombatValidation = require(script.Parent.CombatValidation)
+local PlayerHitboxResolver = require(script.Parent.PlayerHitboxResolver)
 
 local CombatService = {}
 local started = false
 local attackConnection
 local removingConnection
-local lastAttackByPlayer = {}
+local stateByPlayer = {}
 
 local function ensureRemote()
 	local pawlands = ReplicatedStorage:WaitForChild("Pawlands")
@@ -41,13 +42,58 @@ local function runtimeFolder()
 	return folder and folder:IsA("Folder") and folder or nil
 end
 
-local function processAttack(player, target, aimDirection)
-	local now = os.clock()
-	local previous = lastAttackByPlayer[player] or -math.huge
-	if now - previous < Config.AttackCooldown then
-		return
+local function getState(player)
+	local state = stateByPlayer[player]
+	if state then
+		return state
+	end
+	state = {
+		LastRequestAt = -math.huge,
+		LastM1At = -math.huge,
+		NextAttackAt = 0,
+		ComboIndex = 0,
+		Generation = 0,
+	}
+	stateByPlayer[player] = state
+	return state
+end
+
+local function resolveAction(state, actionType, comboIndex, now)
+	if actionType == Config.ActionTypes.RunningAttack then
+		if comboIndex ~= 0 then
+			return nil
+		end
+		state.ComboIndex = 0
+		state.LastM1At = -math.huge
+		return Config.RunningAttack, Config.GetRunningImpactDelay(), Config.RunningAttack.DamageMultiplier
 	end
 
+	if actionType ~= Config.ActionTypes.M1 then
+		return nil
+	end
+	if type(comboIndex) ~= "number" then
+		return nil
+	end
+	comboIndex = math.floor(comboIndex)
+	local expired = now - state.LastM1At > Config.ComboResetSeconds
+	local expected = expired and 1 or ((state.ComboIndex % #Config.Combo) + 1)
+	if comboIndex ~= expected then
+		return nil
+	end
+	local definition = Config.GetComboDefinition(comboIndex)
+	if not definition then
+		return nil
+	end
+	state.ComboIndex = comboIndex
+	state.LastM1At = now
+	return definition, Config.GetComboImpactDelay(comboIndex), definition.DamageMultiplier
+end
+
+local function applyImpact(player, generation, aimDirection, preferredTarget, damageMultiplier)
+	local state = stateByPlayer[player]
+	if not state or state.Generation ~= generation then
+		return
+	end
 	local playerState = CombatValidation.ValidatePlayer(player, Config)
 	if not playerState then
 		return
@@ -56,34 +102,72 @@ local function processAttack(player, target, aimDirection)
 	if not folder then
 		return
 	end
-	local validTarget = CombatValidation.ValidateTarget(target, folder, SlimeHealth)
-	if not validTarget then
-		return
-	end
-	if not CombatValidation.InRange(playerState.Root, target, Config.AttackRange) then
-		return
-	end
-	if not CombatValidation.InAim(playerState.Root, target, aimDirection, Config) then
-		return
-	end
-	if Config.RequireLineOfSight
-		and not CombatValidation.HasLineOfSight(playerState.Character, target, folder) then
+	local aim = CombatValidation.ResolveAim(playerState.Root, aimDirection, Config)
+	local target = PlayerHitboxResolver.Resolve(
+		playerState,
+		aim,
+		preferredTarget,
+		folder,
+		Config,
+		SlimeHealth,
+		CombatValidation
+	)
+	if not target then
 		return
 	end
 
-	-- Consume cooldown only after every authoritative hit check passes.
-	lastAttackByPlayer[player] = now
-	local applied, health = SlimeHealth.ApplyDamage(target, Config.Damage, player)
+	local damage = math.max(1, math.floor(Config.Damage * damageMultiplier + 0.5))
+	local applied, health = SlimeHealth.ApplyDamage(target, damage, player)
 	if applied and RunService:IsStudio() then
 		print(string.format(
 			"[Pawlands Combat] %s hit %s for %d damage (%d/%d HP).",
 			player.Name,
 			tostring(target:GetAttribute("SlimeId") or target.Name),
-			Config.Damage,
+			damage,
 			health,
 			target:GetAttribute("MaxHealth") or health
 		))
 	end
+end
+
+local function processAttack(player, actionType, comboIndex, aimDirection, preferredTarget)
+	local now = os.clock()
+	local state = getState(player)
+	if now - state.LastRequestAt < Config.RequestRateLimitSeconds then
+		return
+	end
+	state.LastRequestAt = now
+
+	local playerState = CombatValidation.ValidatePlayer(player, Config)
+	if not playerState then
+		return
+	end
+	if now + Config.CadenceToleranceSeconds < state.NextAttackAt then
+		return
+	end
+	if actionType == Config.ActionTypes.RunningAttack
+		and not CombatValidation.IsRunningAttackValid(playerState, Config)
+	then
+		return
+	end
+
+	local definition, impactDelay, multiplier = resolveAction(state, actionType, comboIndex, now)
+	if not definition then
+		return
+	end
+	state.NextAttackAt = now + definition.CadenceSeconds
+	state.Generation += 1
+	local generation = state.Generation
+	local boundedAim = CombatValidation.ResolveAim(playerState.Root, aimDirection, Config)
+	local validPreferred = nil
+	local folder = runtimeFolder()
+	if folder and CombatValidation.ValidateTarget(preferredTarget, folder, SlimeHealth) then
+		validPreferred = preferredTarget
+	end
+
+	task.delay(math.max(0, impactDelay), function()
+		applyImpact(player, generation, boundedAim, validPreferred, multiplier or 1)
+	end)
 end
 
 function CombatService.Start()
@@ -94,7 +178,7 @@ function CombatService.Start()
 	local remote = ensureRemote()
 	attackConnection = remote.OnServerEvent:Connect(processAttack)
 	removingConnection = Players.PlayerRemoving:Connect(function(player)
-		lastAttackByPlayer[player] = nil
+		stateByPlayer[player] = nil
 	end)
 end
 
@@ -111,7 +195,7 @@ function CombatService.Stop()
 		removingConnection:Disconnect()
 		removingConnection = nil
 	end
-	table.clear(lastAttackByPlayer)
+	table.clear(stateByPlayer)
 end
 
 return CombatService

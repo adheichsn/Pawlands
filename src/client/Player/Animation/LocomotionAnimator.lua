@@ -1,3 +1,5 @@
+local UserInputService = game:GetService("UserInputService")
+
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerMovement)
 local DirectionResolver = require(script.Parent.DirectionResolver)
@@ -7,18 +9,30 @@ local LocomotionAnimator = {}
 LocomotionAnimator.__index = LocomotionAnimator
 
 local walkTracks = {
-	Forward = { "WalkForward1", "WalkForward2" },
-	Back = { "WalkBack" },
-	Right = { "WalkRight" },
-	Left = { "WalkLeft" },
-	FrontRight = { "WalkFrontRight" },
-	FrontLeft = { "WalkFrontLeft" },
-	BackRight = { "WalkBackRight" },
-	BackLeft = { "WalkBackLeft" },
+	Forward = "WalkForward1",
+	Back = "WalkBack",
+	Right = "WalkRight",
+	Left = "WalkLeft",
+	FrontRight = "WalkFrontRight",
+	FrontLeft = "WalkFrontLeft",
+	BackRight = "WalkBackRight",
+	BackLeft = "WalkBackLeft",
 }
 
-local runTracks = { "Run1", "Run2" }
 local idleAlternates = { "IdleAlt1", "IdleAlt2" }
+
+local function horizontalSpeed(root)
+	local velocity = root.AssemblyLinearVelocity
+	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+end
+
+local function playbackSpeed(actualSpeed, referenceSpeed)
+	return math.clamp(
+		actualSpeed / math.max(referenceSpeed, 0.001),
+		Config.MinimumPlaybackSpeed,
+		Config.MaximumPlaybackSpeed
+	)
+end
 
 local function randomFrom(random, values)
 	return values[random:NextInteger(1, #values)]
@@ -31,41 +45,17 @@ function LocomotionAnimator.new(humanoid, root, animator)
 		Tracks = AnimationTracks.new(animator),
 		Random = Random.new(),
 		Mode = "",
-		Direction = "",
+		Direction = "Forward",
 		WasAirborne = false,
 		MaxDownSpeed = 0,
 		OneShotToken = 0,
 		OneShotActive = false,
+		OneShotStartedAt = 0,
 		NextIdleVariantAt = 0,
-		CombatOverride = false,
 	}, LocomotionAnimator)
 
-	self:EnterIdle()
+	self:EnterIdle(Config.AnimationFade)
 	return self
-end
-
-
-function LocomotionAnimator:SetCombatOverride(active, fadeTime)
-	active = active == true
-	if self.CombatOverride == active then
-		return
-	end
-
-	self.CombatOverride = active
-	self.OneShotToken += 1
-	self.OneShotActive = false
-	self.Direction = ""
-	self.WasAirborne = false
-	self.MaxDownSpeed = 0
-
-	if active then
-		self.Mode = "Combat"
-		self.Tracks:StopAll(fadeTime or Config.AnimationFade)
-	else
-		-- Force the next PreRender update to enter the locomotion state that is
-		-- actually true now instead of revealing a hidden mid-cycle walk/run pose.
-		self.Mode = ""
-	end
 end
 
 function LocomotionAnimator:ScheduleIdleVariant()
@@ -75,11 +65,11 @@ function LocomotionAnimator:ScheduleIdleVariant()
 	)
 end
 
-function LocomotionAnimator:EnterIdle()
+function LocomotionAnimator:EnterIdle(fadeTime)
 	self.Mode = "Idle"
-	self.Direction = ""
+	self.Direction = "Forward"
 	self.OneShotActive = false
-	self.Tracks:PlayExclusive("IdleBase", Config.AnimationFade)
+	self.Tracks:PlayExclusive("IdleBase", fadeTime or Config.AnimationFade, 1)
 	self:ScheduleIdleVariant()
 end
 
@@ -87,7 +77,8 @@ function LocomotionAnimator:PlayOneShot(name, onFinished)
 	self.OneShotToken += 1
 	local token = self.OneShotToken
 	self.OneShotActive = true
-	local track = self.Tracks:PlayExclusive(name, Config.OneShotFade)
+	self.OneShotStartedAt = os.clock()
+	local track = self.Tracks:PlayExclusive(name, Config.OneShotFade, 1)
 	if not track then
 		self.OneShotActive = false
 		if onFinished then
@@ -134,7 +125,7 @@ function LocomotionAnimator:UpdateIdleVariant()
 	local name = randomFrom(self.Random, idleAlternates)
 	self:PlayOneShot(name, function()
 		if self.Mode == "Idle" then
-			self.Tracks:PlayExclusive("IdleBase", Config.AnimationFade)
+			self.Tracks:PlayExclusive("IdleBase", Config.AnimationFade, 1)
 			self:ScheduleIdleVariant()
 		end
 	end)
@@ -144,9 +135,6 @@ function LocomotionAnimator:Update(isRunning)
 	local humanoid = self.Humanoid
 	local root = self.Root
 	if humanoid.Health <= 0 or not root.Parent then
-		return
-	end
-	if self.CombatOverride then
 		return
 	end
 
@@ -164,12 +152,12 @@ function LocomotionAnimator:Update(isRunning)
 		if state == Enum.HumanoidStateType.Jumping or root.AssemblyLinearVelocity.Y > 1.5 then
 			if self.Mode ~= "Jump" then
 				self.Mode = "Jump"
-				self.Tracks:PlayExclusive("Jump", Config.AnimationFade)
+				self.Tracks:PlayExclusive("Jump", Config.AnimationFade, 1)
 			end
 		else
 			if self.Mode ~= "Falling" then
 				self.Mode = "Falling"
-				self.Tracks:PlayExclusive("Falling", Config.AnimationFade)
+				self.Tracks:PlayExclusive("Falling", Config.AnimationFade, 1)
 			end
 		end
 		return
@@ -185,34 +173,25 @@ function LocomotionAnimator:Update(isRunning)
 	end
 
 	local moving = humanoid.MoveDirection.Magnitude > Config.MoveDeadzone
+	local speed = horizontalSpeed(root)
 
-	-- Ground one-shots must be allowed to finish while the player stays still.
-	-- Idle variants and RunStop were previously restarted into IdleBase on the
-	-- very next frame, making those animations effectively invisible. Landing
-	-- remains non-interruptible; idle/run-stop one-shots can still be cancelled
-	-- immediately when the player starts moving.
 	if self.OneShotActive then
-		if self.Mode == "Landing" or not moving then
-			return
-		end
-	end
-
-	if not moving then
-		if self.Mode == "Run" then
-			self.Mode = "RunStop"
-			self:PlayOneShot("RunStop", function()
-				if self.Humanoid.MoveDirection.Magnitude <= Config.MoveDeadzone
-					and self.Humanoid.FloorMaterial ~= Enum.Material.Air then
-					self:EnterIdle()
-				end
-			end)
-			if self.OneShotActive then
+		if self.Mode == "Landing" then
+			local lockedFor = os.clock() - self.OneShotStartedAt
+			if not moving or lockedFor < Config.MinimumLandingPresentationLock then
 				return
 			end
+		elseif not moving then
+			return
 		end
+		self.OneShotToken += 1
+		self.OneShotActive = false
+	end
 
+	if not moving or speed <= Config.IdleSpeed then
+		local fade = self.Mode == "Run" and Config.SprintStopFade or Config.AnimationFade
 		if self.Mode ~= "Idle" or (self.Tracks:Get("IdleBase") and not self.Tracks:Get("IdleBase").IsPlaying) then
-			self:EnterIdle()
+			self:EnterIdle(fade)
 		else
 			self:UpdateIdleVariant()
 		end
@@ -223,20 +202,34 @@ function LocomotionAnimator:Update(isRunning)
 	self.OneShotActive = false
 
 	if isRunning then
-		if self.Mode ~= "Run" then
-			self.Mode = "Run"
-			self.Direction = ""
-			self.Tracks:PlayExclusive(randomFrom(self.Random, runTracks), Config.AnimationFade)
-		end
+		self.Mode = "Run"
+		self.Direction = "Forward"
+		self.Tracks:PlayExclusive(
+			"RunNormal",
+			Config.AnimationFade,
+			playbackSpeed(speed, Config.RunReferenceSpeed)
+		)
 		return
 	end
 
-	local direction = DirectionResolver.Resolve(root, humanoid.MoveDirection)
-	if self.Mode ~= "Walk" or self.Direction ~= direction then
-		self.Mode = "Walk"
-		self.Direction = direction
-		self.Tracks:PlayExclusive(randomFrom(self.Random, walkTracks[direction]), Config.AnimationFade)
+	local facingLocked = not humanoid.AutoRotate
+		or UserInputService.MouseBehavior == Enum.MouseBehavior.LockCenter
+	local direction = "Forward"
+	if facingLocked then
+		direction = DirectionResolver.Resolve(
+			root,
+			humanoid.MoveDirection,
+			self.Direction,
+			Config.DirectionHysteresisDegrees
+		)
 	end
+	self.Mode = "Walk"
+	self.Direction = direction
+	self.Tracks:PlayExclusive(
+		walkTracks[direction] or "WalkForward1",
+		Config.AnimationFade,
+		playbackSpeed(speed, Config.WalkReferenceSpeed)
+	)
 end
 
 function LocomotionAnimator:Destroy()

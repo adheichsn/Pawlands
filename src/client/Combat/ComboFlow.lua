@@ -1,165 +1,109 @@
+local RunService = game:GetService("RunService")
+
 local ComboFlow = {}
 ComboFlow.__index = ComboFlow
-
-local function resolveHoldSeconds(config, timing, naturalSeconds)
-	local seconds = timing.MaxHold
-	if naturalSeconds and naturalSeconds > 0 then
-		seconds = naturalSeconds - config.AnimationExitBlendLead
-	end
-	return math.clamp(seconds, timing.MinHold, timing.MaxHold)
-end
+local EPSILON = 0.0001
 
 function ComboFlow.new(config, callbacks)
-	return setmetatable({
+	local self = setmetatable({
 		Config = config,
 		Callbacks = callbacks,
-		Active = false,
-		Kind = nil,
 		ComboIndex = 0,
-		Token = 0,
-		StartedAt = 0,
-		NextAt = nil,
-		FinishAt = 0,
-		QueuedNext = false,
-		QueuedRestart = false,
-		QueuedRestartRunning = false,
+		LastAttackAt = -math.huge,
+		NextAttackAt = 0,
+		Buffered = false,
+		BufferedRunning = false,
+		Destroyed = false,
 	}, ComboFlow)
-end
 
-function ComboFlow:_finish()
-	if not self.Active then
-		return
-	end
-	self.Token += 1
-	self.Active = false
-	self.Kind = nil
-	self.ComboIndex = 0
-	self.StartedAt = 0
-	self.NextAt = nil
-	self.FinishAt = 0
-	self.QueuedNext = false
-	self.QueuedRestart = false
-	self.QueuedRestartRunning = false
-	if self.Callbacks.OnChainEnd then
-		self.Callbacks.OnChainEnd()
-	end
-end
-
-function ComboFlow:_timingFor(kind, comboIndex)
-	if kind == "Running" then
-		return self.Config.RunningTiming
-	end
-	return self.Config.ComboTiming[comboIndex]
-end
-
-function ComboFlow:_play(kind, comboIndex)
-	if not self.Active then
-		self.Active = true
-		if self.Callbacks.OnChainStart then
-			self.Callbacks.OnChainStart()
-		end
-	end
-
-	self.Token += 1
-	local token = self.Token
-	self.Kind = kind
-	self.ComboIndex = comboIndex or 0
-	self.QueuedNext = false
-	self.QueuedRestart = false
-	self.QueuedRestartRunning = false
-	self.StartedAt = os.clock()
-
-	local naturalSeconds
-	if self.Callbacks.OnAttack then
-		naturalSeconds = self.Callbacks.OnAttack(kind, comboIndex)
-	end
-
-	local timing = self:_timingFor(kind, comboIndex)
-	local holdSeconds = resolveHoldSeconds(self.Config, timing, naturalSeconds)
-	self.NextAt = timing.NextAt and (self.StartedAt + timing.NextAt) or nil
-	self.FinishAt = self.StartedAt + holdSeconds
-
-	if self.NextAt then
-		local delaySeconds = math.max(0, self.NextAt - os.clock())
-		task.delay(delaySeconds, function()
-			if not self.Active or self.Token ~= token or not self.QueuedNext then
-				return
-			end
-			self:_advance()
-		end)
-	end
-
-	task.delay(math.max(0, self.FinishAt - os.clock()), function()
-		if not self.Active or self.Token ~= token then
-			return
-		end
-		if self.Kind == "Combo" and self.ComboIndex == 4 and self.QueuedRestart then
-			local running = self.QueuedRestartRunning
-			self:_finish()
-			self:_startFresh(running)
-			return
-		end
-		self:_finish()
+	self.Heartbeat = RunService.Heartbeat:Connect(function()
+		self:_flushBuffered()
 	end)
+	return self
 end
 
-function ComboFlow:_startFresh(running)
-	if running then
-		self:_play("Running", 0)
+function ComboFlow:_clearBuffer()
+	self.Buffered = false
+	self.BufferedRunning = false
+end
+
+function ComboFlow:_resolveAction(now, running)
+	local comboExpired = now - self.LastAttackAt > self.Config.ComboResetSeconds
+	if running and comboExpired then
+		return "Running", 0, self.Config.RunningAttack
+	end
+
+	if comboExpired or self.ComboIndex <= 0 then
+		self.ComboIndex = 1
 	else
-		self:_play("Combo", 1)
+		self.ComboIndex = (self.ComboIndex % #self.Config.Combo) + 1
 	end
+	return "Combo", self.ComboIndex, self.Config.Combo[self.ComboIndex]
 end
 
-function ComboFlow:_advance()
-	if not self.Active then
-		return
-	end
-	if self.Kind == "Running" then
-		self:_play("Combo", 1)
-		return
-	end
-	if self.Kind == "Combo" and self.ComboIndex < 4 then
-		self:_play("Combo", self.ComboIndex + 1)
-	end
-end
-
-function ComboFlow:Request(running)
-	if not self.Active then
-		self:_startFresh(running == true)
-		return true
-	end
-
-	local now = os.clock()
-	if self.Kind == "Combo" and self.ComboIndex == 4 then
-		if now >= self.FinishAt - self.Config.FinisherRestartBufferSeconds then
-			self.QueuedRestart = true
-			self.QueuedRestartRunning = running == true
-			return true
-		end
+function ComboFlow:_commit(now, running)
+	local kind, comboIndex, definition = self:_resolveAction(now, running)
+	if not definition then
 		return false
 	end
 
-	if self.NextAt and now >= self.NextAt then
-		self:_advance()
-		return true
+	self.LastAttackAt = now
+	self.NextAttackAt = now + definition.CadenceSeconds
+	self:_clearBuffer()
+
+	if self.Callbacks.OnAttack then
+		self.Callbacks.OnAttack(kind, comboIndex)
+	end
+	return true
+end
+
+function ComboFlow:_flushBuffered()
+	if self.Destroyed or not self.Buffered then
+		return
+	end
+	local now = os.clock()
+	if now + EPSILON < self.NextAttackAt then
+		return
+	end
+	local running = self.BufferedRunning
+	self:_commit(now, running)
+end
+
+function ComboFlow:Request(running)
+	if self.Destroyed then
+		return false
 	end
 
-	if self.NextAt then
-		-- Only a single next hit is buffered; repeated early clicks do not compress
-		-- the authored swing into an unnaturally fast chain.
-		self.QueuedNext = true
-		return true
+	local now = os.clock()
+	if now + EPSILON >= self.NextAttackAt then
+		return self:_commit(now, running == true)
 	end
 
+	local timeUntilReady = self.NextAttackAt - now
+	if not self.Buffered and timeUntilReady <= self.Config.InputBufferSeconds + EPSILON then
+		self.Buffered = true
+		self.BufferedRunning = running == true
+		return true
+	end
 	return false
 end
 
 function ComboFlow:Cancel()
-	self:_finish()
+	self.ComboIndex = 0
+	self.LastAttackAt = -math.huge
+	self.NextAttackAt = 0
+	self:_clearBuffer()
 end
 
 function ComboFlow:Destroy()
+	if self.Destroyed then
+		return
+	end
+	self.Destroyed = true
+	if self.Heartbeat then
+		self.Heartbeat:Disconnect()
+		self.Heartbeat = nil
+	end
 	self:Cancel()
 	self.Callbacks = {}
 end

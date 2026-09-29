@@ -4,8 +4,8 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerCombat)
-local MovementConfig = require(Shared.Config.PlayerMovement)
 local CombatTargeting = require(script.Parent.CombatTargeting)
+local CombatContactRuntime = require(script.Parent.CombatContactRuntime)
 local PlayerAttackAnimator = require(script.Parent.PlayerAttackAnimator)
 local ComboFlow = require(script.Parent.ComboFlow)
 local PlayerMovementController = require(script.Parent.Parent.Player.PlayerMovementController)
@@ -25,13 +25,9 @@ local function isGrounded(humanoid)
 		and humanoid:GetState() ~= Enum.HumanoidStateType.Freefall
 end
 
-local function isActivelyRunning(humanoid, root)
-	if humanoid.WalkSpeed < MovementConfig.RunSpeed - 0.1 or humanoid.MoveDirection.Magnitude <= 0.10 then
-		return false
-	end
+local function horizontalSpeed(root)
 	local velocity = root.AssemblyLinearVelocity
-	local horizontalSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
-	return horizontalSpeed >= Config.RunningAttackMinHorizontalSpeed
+	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
 end
 
 function PlayerCombatController.Start()
@@ -53,7 +49,6 @@ function PlayerCombatController.Start()
 			comboRuntime:Destroy()
 			comboRuntime = nil
 		end
-		PlayerMovementController.SetCombatAnimationOverride(false, Config.AnimationExitFade)
 		if animatorRuntime then
 			animatorRuntime:Destroy()
 			animatorRuntime = nil
@@ -70,36 +65,27 @@ function PlayerCombatController.Start()
 		animatorRuntime = PlayerAttackAnimator.new(animator)
 
 		comboRuntime = ComboFlow.new(Config, {
-			OnChainStart = function()
-				PlayerMovementController.SetCombatAnimationOverride(true, Config.LocomotionSuppressFade)
-			end,
-			OnChainEnd = function()
-				if animatorRuntime then
-					animatorRuntime:StopCurrent(Config.AnimationExitFade)
-				end
-				PlayerMovementController.SetCombatAnimationOverride(false, Config.AnimationExitFade)
-			end,
 			OnAttack = function(kind, comboIndex)
-				local naturalSeconds
-				if animatorRuntime then
-					if kind == "Running" then
-						local _, duration = animatorRuntime:PlayRunning()
-						naturalSeconds = duration
-					else
-						local _, duration = animatorRuntime:PlayCombo(comboIndex)
-						naturalSeconds = duration
-					end
+				if not character or not root or not humanoid or humanoid.Health <= 0 then
+					return
 				end
 
-				-- Damage targeting is evaluated on each staged swing, not on the raw input
-				-- press that may have been buffered earlier in the previous animation.
-				if character and root then
-					local target, aimDirection = CombatTargeting.Acquire(character, root, mouse.Target, Config)
-					if target then
-						remote:FireServer(target, aimDirection)
-					end
+				if kind == "Running" then
+					animatorRuntime:PlayRunning()
+				else
+					animatorRuntime:PlayCombo(comboIndex)
 				end
-				return naturalSeconds
+
+				-- Preferred target only improves local facing/contact presentation. The
+				-- server resolves the actual victim from the forward melee volume.
+				local preferred, fallbackAim = CombatTargeting.Acquire(character, root, mouse.Target, Config)
+				local aimDirection = CombatContactRuntime.PrepareAttack(
+					character,
+					preferred,
+					Config,
+					fallbackAim
+				)
+				remote:FireServer(kind, comboIndex, aimDirection, preferred)
 			end,
 		})
 	end
@@ -112,7 +98,10 @@ function PlayerCombatController.Start()
 			return false
 		end
 
-		return comboRuntime:Request(isActivelyRunning(humanoid, root))
+		local running = PlayerMovementController.IsRunning()
+			and humanoid.MoveDirection.Magnitude > 0.10
+			and horizontalSpeed(root) >= Config.RunningAttack.ClientMinimumHorizontalSpeedStuds
+		return comboRuntime:Request(running)
 	end
 
 	attackCurrent = tryAttack
@@ -140,8 +129,8 @@ function PlayerCombatController.Start()
 	end
 end
 
--- Future Studio-owned mobile/gamepad input can call this same entry point.
--- No touch GUI is created by runtime code.
+-- Future Studio-owned mobile/gamepad input can call the same entry point without
+-- changing targeting, cadence, or server authority.
 function PlayerCombatController.Attack()
 	return attackCurrent and attackCurrent() or false
 end

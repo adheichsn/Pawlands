@@ -1,5 +1,6 @@
 -- Player locomotion animation ids are intentionally config-owned through Rojo.
--- The runtime creates temporary Animation objects only for loading these tracks.
+-- The current responsive Humanoid movement crossfades directly from run to idle;
+-- no RunStop clip is loaded or played at runtime.
 local function asset(id)
 	return "rbxassetid://" .. tostring(id)
 end
@@ -22,9 +23,10 @@ return table.freeze({
 		BackLeft = asset(118699550130591),
 	}),
 	Run = table.freeze({
-		Forward1 = asset(116422451361262),
-		Forward2 = asset(75530602135713),
-		Stop = asset(71937415563664),
+		-- Run2 is the normal Pawtopia-style sprint presentation. Run1 stays reserved
+		-- for a future faster movement tier instead of being randomly alternated.
+		Fast = asset(116422451361262),
+		Normal = asset(75530602135713),
 	}),
 	Air = table.freeze({
 		Jump = asset(115499882416700),

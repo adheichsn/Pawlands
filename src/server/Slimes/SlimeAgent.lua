@@ -12,6 +12,10 @@ local function horizontalDistance(a, b)
 	return horizontal(a - b).Magnitude
 end
 
+local function isCombatState(state)
+	return state == "Notice" or state == "Chase" or state == "Engage" or state == "Attack"
+end
+
 function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 	local self = setmetatable({
 		Slot = slot,
@@ -27,6 +31,9 @@ function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 		WanderTarget = nil,
 		HomePosition = spawnPosition,
 		IdleUntil = 0,
+		NoticeUntil = 0,
+		NextAttackAt = 0,
+		Strike = nil,
 		FormationSlot = nil,
 		CombatReady = false,
 		MoveTravel = 0,
@@ -63,7 +70,7 @@ function SlimeAgent:SetState(state, targetPlayer)
 	self.Model:SetAttribute("SlimeState", state)
 	self.Model:SetAttribute("TargetUserId", targetPlayer and targetPlayer.UserId or 0)
 
-	if state == "Chase" or state == "Engage" then
+	if isCombatState(state) then
 		self.WanderTarget = nil
 	else
 		self.FormationSlot = nil
@@ -76,6 +83,7 @@ end
 
 function SlimeAgent:EnterIdle(now, randomObject)
 	self.WanderTarget = nil
+	self.Strike = nil
 	self:SetState("Idle", nil)
 	SlimeNavigation.Reset(self)
 	self.IdleUntil = now + randomObject:NextNumber(self.Config.IdleMinSeconds, self.Config.IdleMaxSeconds)
@@ -88,11 +96,46 @@ end
 
 function SlimeAgent:EnterReturn()
 	self.WanderTarget = nil
+	self.Strike = nil
 	self:SetState("Return", nil)
+end
+
+function SlimeAgent:EnterNotice(player, now, combatConfig)
+	self.Strike = nil
+	self:SetCombatReady(false)
+	self:SetState("Notice", player)
+	self.NoticeUntil = now + combatConfig.NoticeSeconds
+	self.NextAttackAt = math.max(self.NextAttackAt, self.NoticeUntil + combatConfig.InitialAttackDelaySeconds
+		+ ((self.Slot - 1) * combatConfig.AttackStaggerSeconds))
 end
 
 function SlimeAgent:DistanceTo(worldPosition)
 	return horizontalDistance(self.Position, worldPosition)
+end
+
+function SlimeAgent:_applyPose(basePosition, verticalOffset, lookDirection)
+	local pivotPosition = basePosition + Vector3.new(0, self.Visual.GroundOffset + (verticalOffset or 0), 0)
+	local look = horizontal(lookDirection or self.Facing)
+	if look.Magnitude <= 0.001 then
+		look = self.Facing.Magnitude > 0.001 and self.Facing or Vector3.new(0, 0, 1)
+	else
+		look = look.Unit
+		self.Facing = look
+	end
+	local frame = CFrame.lookAt(pivotPosition, pivotPosition + look)
+		* CFrame.Angles(0, math.rad(self.Config.YawOffset), 0)
+	self.Model:PivotTo(frame)
+end
+
+function SlimeAgent:SetAttackPose(basePosition, verticalOffset, targetPosition)
+	local grounded = Vector3.new(basePosition.X, self.Position.Y, basePosition.Z)
+	local direction = horizontal(targetPosition - grounded)
+	self:_applyPose(grounded, verticalOffset, direction)
+end
+
+function SlimeAgent:RestoreGroundPose(targetPosition)
+	local direction = targetPosition and horizontal(targetPosition - self.Position) or self.Facing
+	self:_applyPose(self.Position, 0, direction)
 end
 
 function SlimeAgent:Step(goal, speed, agents, zone, dt)
@@ -140,12 +183,7 @@ function SlimeAgent:Step(goal, speed, agents, zone, dt)
 	if self.Visual.Animation then
 		self.Visual.Animation:SetMoving(moving)
 	end
-
-	local pivotPosition = self.Position + Vector3.new(0, self.Visual.GroundOffset + verticalOffset, 0)
-	local look = self.Facing.Magnitude > 0.001 and self.Facing or Vector3.new(0, 0, 1)
-	local frame = CFrame.lookAt(pivotPosition, pivotPosition + look)
-		* CFrame.Angles(0, math.rad(self.Config.YawOffset), 0)
-	self.Model:PivotTo(frame)
+	self:_applyPose(self.Position, verticalOffset, self.Facing)
 end
 
 function SlimeAgent:FaceToward(worldPosition, dt)
@@ -158,12 +196,14 @@ function SlimeAgent:FaceToward(worldPosition, dt)
 	if facing.Magnitude > 0.001 then
 		self.Facing = facing.Unit
 	end
+	self:_applyPose(self.Position, 0, self.Facing)
 end
 
 function SlimeAgent:Destroy()
 	self.TargetPlayer = nil
 	self.WanderTarget = nil
 	self.FormationSlot = nil
+	self.Strike = nil
 	self:SetCombatReady(false)
 	SlimeNavigation.Reset(self)
 end

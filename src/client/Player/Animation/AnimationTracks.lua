@@ -19,15 +19,14 @@ local definitions = {
 	WalkBackRight = { Id = Animations.Walk.BackRight, Priority = Enum.AnimationPriority.Movement, Looped = true },
 	WalkBackLeft = { Id = Animations.Walk.BackLeft, Priority = Enum.AnimationPriority.Movement, Looped = true },
 
-	Run1 = { Id = Animations.Run.Forward1, Priority = Enum.AnimationPriority.Movement, Looped = true },
-	Run2 = { Id = Animations.Run.Forward2, Priority = Enum.AnimationPriority.Movement, Looped = true },
-	RunStop = { Id = Animations.Run.Stop, Priority = Enum.AnimationPriority.Action, Looped = false },
+	RunNormal = { Id = Animations.Run.Normal, Priority = Enum.AnimationPriority.Movement, Looped = true },
+	RunFast = { Id = Animations.Run.Fast, Priority = Enum.AnimationPriority.Movement, Looped = true },
 
-	Jump = { Id = Animations.Air.Jump, Priority = Enum.AnimationPriority.Action, Looped = false },
-	Falling = { Id = Animations.Air.Falling, Priority = Enum.AnimationPriority.Action, Looped = true },
-	LandingLight = { Id = Animations.Air.LandingLight, Priority = Enum.AnimationPriority.Action, Looped = false },
-	LandingMedium = { Id = Animations.Air.LandingMedium, Priority = Enum.AnimationPriority.Action, Looped = false },
-	LandingHeavy = { Id = Animations.Air.LandingHeavy, Priority = Enum.AnimationPriority.Action, Looped = false },
+	Jump = { Id = Animations.Air.Jump, Priority = Enum.AnimationPriority.Movement, Looped = false },
+	Falling = { Id = Animations.Air.Falling, Priority = Enum.AnimationPriority.Movement, Looped = true },
+	LandingLight = { Id = Animations.Air.LandingLight, Priority = Enum.AnimationPriority.Movement, Looped = false },
+	LandingMedium = { Id = Animations.Air.LandingMedium, Priority = Enum.AnimationPriority.Movement, Looped = false },
+	LandingHeavy = { Id = Animations.Air.LandingHeavy, Priority = Enum.AnimationPriority.Movement, Looped = false },
 }
 
 function AnimationTracks.new(animator)
@@ -64,18 +63,20 @@ function AnimationTracks:PlayExclusive(name, fadeTime, speed)
 	if not target then
 		return nil
 	end
+
 	if self.Current == name and target.IsPlaying then
+		target:AdjustSpeed(speed or 1)
 		return target
 	end
 
 	for otherName, track in pairs(self.Tracks) do
 		if otherName ~= name and track.IsPlaying then
-			track:Stop(fadeTime)
+			track:Stop(fadeTime or 0.1)
 		end
 	end
 
 	self.Current = name
-	target:Play(fadeTime, 1, speed or 1)
+	target:Play(fadeTime or 0.1, 1, speed or 1)
 	return target
 end
 

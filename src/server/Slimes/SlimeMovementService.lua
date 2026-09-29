@@ -6,8 +6,10 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Catalog = require(Shared.Config.SlimeCatalog)
 local Config = require(Shared.Config.SlimeMovement)
+local CombatConfig = require(Shared.Config.SlimeCombat)
 
 local SlimeAgent = require(script.Parent.SlimeAgent)
+local SlimeAttackRuntime = require(script.Parent.SlimeAttackRuntime)
 local SlimeFactory = require(script.Parent.SlimeFactory)
 local SlimeFormation = require(script.Parent.SlimeFormation)
 local SlimeNavigation = require(script.Parent.SlimeNavigation)
@@ -39,11 +41,6 @@ local function getOrCreateRuntimeFolder()
 	folder.Name = Config.RuntimeFolderName
 	folder.Parent = Workspace
 	return folder
-end
-
-local function horizontalDistance(a, b)
-	local delta = a - b
-	return Vector3.new(delta.X, 0, delta.Z).Magnitude
 end
 
 local function getRoot(player)
@@ -97,15 +94,51 @@ local function chooseWanderTarget(agent)
 	return zone:ClampXZ(target)
 end
 
+local function disengage(agent, now)
+	SlimeAttackRuntime.Cancel(agent)
+	if agent:DistanceTo(agent.HomePosition) > Config.ReturnHomeDistance then
+		agent:EnterReturn()
+	else
+		agent:EnterIdle(now, randomObject)
+	end
+end
+
 local function updateStates(now)
 	for _, agent in ipairs(agents) do
 		if not SlimeHealth.IsAlive(agent.Model) then
+			SlimeAttackRuntime.Cancel(agent)
 			agent:SetState("Defeated", nil)
 			agent:SetCombatReady(false)
 			continue
 		end
+
+		if agent.State == "Attack" then
+			local valid = agent.TargetPlayer and isTargetValid(agent, agent.TargetPlayer, true)
+			if not valid then
+				disengage(agent, now)
+			end
+			continue
+		end
+
 		local target = chooseTarget(agent)
 		if target then
+			local targetChanged = target ~= agent.TargetPlayer
+			if targetChanged
+				or agent.State == "Idle"
+				or agent.State == "Wander"
+				or agent.State == "Return"
+			then
+				agent:EnterNotice(target, now, CombatConfig)
+				continue
+			end
+
+			if agent.State == "Notice" then
+				if now >= agent.NoticeUntil then
+					agent:SetState("Chase", target)
+				end
+				continue
+			end
+
 			local root = getRoot(target)
 			local ready = false
 			if root then
@@ -120,12 +153,8 @@ local function updateStates(now)
 				agent:SetState("Chase", target)
 				agent:SetCombatReady(false)
 			end
-		elseif agent.State == "Chase" or agent.State == "Engage" then
-			if agent:DistanceTo(agent.HomePosition) > Config.ReturnHomeDistance then
-				agent:EnterReturn()
-			else
-				agent:EnterIdle(now, randomObject)
-			end
+		elseif agent.State == "Notice" or agent.State == "Chase" or agent.State == "Engage" then
+			disengage(agent, now)
 		elseif agent.State == "Idle" then
 			if now >= agent.IdleUntil then
 				agent:EnterWander(chooseWanderTarget(agent))
@@ -212,14 +241,31 @@ local function stepAgent(agent, formationGoal, now, dt)
 		return
 	end
 
+	if agent.State == "Attack" then
+		SlimeAttackRuntime.Update(agent, now, zone, CombatConfig)
+		return
+	end
+
 	local rawGoal = agent.Position
 	local speed = 0
 	local targetRoot = agent.TargetPlayer and getRoot(agent.TargetPlayer) or nil
 
-	if agent.State == "Chase" and formationGoal then
+	if agent.State == "Notice" and targetRoot then
+		agent:FaceToward(targetRoot.Position, dt)
+		if agent.Visual.Animation then
+			agent.Visual.Animation:SetMoving(false)
+		end
+		return
+	elseif agent.State == "Chase" and formationGoal then
 		rawGoal = formationGoal
 		speed = chaseSpeedFor(agent, rawGoal)
 	elseif agent.State == "Engage" and formationGoal and targetRoot then
+		if agent.CombatReady and now >= agent.NextAttackAt then
+			if SlimeAttackRuntime.Begin(agent, agent.TargetPlayer, targetRoot, now, CombatConfig) then
+				return
+			end
+		end
+
 		local playerDistance = agent:DistanceTo(targetRoot.Position)
 		local slotDistance = agent:DistanceTo(formationGoal)
 		if playerDistance < Config.EngageInnerDistance or slotDistance > Config.FormationSlotTolerance then
@@ -314,7 +360,7 @@ function SlimeMovementService.Start()
 		end
 	end)
 	print(string.format(
-		"[Pawlands Slimes] Crowd navigation ready with %d slime(s), square engage formation, obstacle avoidance, and %d authored animation loop(s).",
+		"[Pawlands Slimes] Pawtopia-style notice/chase/strike loop ready with %d slime(s), square formation, obstacle avoidance, and %d authored animation loop(s).",
 		#agents,
 		authoredLoopCount
 	))
@@ -330,6 +376,7 @@ function SlimeMovementService.Stop()
 		heartbeatConnection = nil
 	end
 	for _, agent in ipairs(agents) do
+		SlimeAttackRuntime.Cancel(agent)
 		agent:Destroy()
 		SlimeFactory.Destroy(agent.Visual)
 	end

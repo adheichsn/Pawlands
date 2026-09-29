@@ -12,13 +12,13 @@ return table.freeze({
 	-- arena instead of sitting directly on the authored edge attachments.
 	SpawnBoundaryInsetAlpha = 0.55,
 
-	WanderSpeed = 4.5,
-	ChaseSpeed = 8.5,
+	WanderSpeed = 2.8,
+	ChaseSpeed = 9.8,
 	ChaseCatchupMaxSpeed = 11.5,
 	ChaseCatchupStartDistance = 10,
 	ChaseCatchupFullDistance = 24,
-	EngageRepositionSpeed = 4.75,
-	ReturnSpeed = 5.5,
+	EngageRepositionSpeed = 6.0,
+	ReturnSpeed = 8.8,
 	IdleSeparationSpeed = 2.25,
 	Acceleration = 11,
 	TurnSpeed = 12,
