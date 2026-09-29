@@ -2,61 +2,168 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Config = require(script.Parent.Parent.Config.Development)
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
+local PartyConfig = require(Shared.Config.PetParty)
 local Catalog = require(Shared.Config.PetCatalog)
+local Rules = require(Shared.Pets.PartyRules)
 
 local StudioPetPreview = {}
 local started = false
 
-function StudioPetPreview.Start(service)
+local function catalogNames()
+	local names = {}
+	for id in pairs(Catalog.Pets) do
+		table.insert(names, id)
+	end
+	table.sort(names)
+	return names
+end
+
+function StudioPetPreview.Start(partyService, inventoryService)
 	if started or not RunService:IsStudio() then
 		return
 	end
 	started = true
 	local connections, initialized = {}, {}
-	local function apply(player, party)
-		local ok, reason = service.SetParty(player, party)
+
+	local function printParty(player)
+		local entries = {}
+		for _, uid in ipairs(partyService.GetParty(player)) do
+			local pet = inventoryService.GetPet(player, uid)
+			if pet then
+				table.insert(entries, uid .. "=" .. pet.PetId)
+			end
+		end
+		print("[Pawlands Pets] Party " .. player.Name .. ": " .. (#entries > 0 and table.concat(entries, ", ") or "empty"))
+	end
+
+	local function printInventory(player)
+		local equipped = {}
+		for _, uid in ipairs(partyService.GetParty(player)) do
+			equipped[uid] = true
+		end
+		local entries = {}
+		for _, pet in ipairs(inventoryService.GetInventory(player)) do
+			local marker = equipped[pet.Uid] and " [equipped]" or ""
+			table.insert(entries, pet.Uid .. "=" .. pet.PetId .. "/" .. pet.Variant .. marker)
+		end
+		print("[Pawlands Pets] Inventory " .. player.Name .. ": " .. (#entries > 0 and table.concat(entries, ", ") or "empty"))
+	end
+
+	local function ensureOwned(player, petId)
+		for _, pet in ipairs(inventoryService.GetInventory(player)) do
+			if pet.PetId == petId then
+				return pet.Uid
+			end
+		end
+		local pet, reason = inventoryService.Grant(player, petId)
+		return pet and pet.Uid or nil, reason
+	end
+
+	local function applyNames(player, requestedNames)
+		local normalized, reason = Rules.validate(requestedNames, Catalog, PartyConfig.MaxSize)
+		if not normalized then
+			return false, reason
+		end
+		local uids = {}
+		for _, petId in ipairs(normalized) do
+			local uid, grantReason = ensureOwned(player, petId)
+			if not uid then
+				return false, grantReason
+			end
+			table.insert(uids, uid)
+		end
+		return partyService.SetParty(player, uids)
+	end
+
+	local function report(player, ok, reason)
 		if ok then
-			print("[Pawlands Pets] " .. player.Name .. ": " .. table.concat(service.GetParty(player), ", "))
+			printParty(player)
 		else
 			warn("[Pawlands Pets] " .. player.Name .. ": " .. tostring(reason))
 		end
 	end
+
+	local function help()
+		print("[Pawlands Pets] !pets Bunny Cat Dog Dragon | !pets clear | !pets list")
+		print("[Pawlands Pets] !petgrant Bunny | !petinventory | !petequip p1 | !petunequip p1 | !party | !petreset")
+	end
+
 	local function added(player)
 		if initialized[player] then
 			return
 		end
 		initialized[player] = true
 		if Config.EnablePetPreview then
-			apply(player, Config.PreviewParty)
+			report(player, applyNames(player, Config.PreviewParty))
 		end
 		if Config.EnablePetCommands then
 			connections[player] = player.Chatted:Connect(function(message)
 				local command, tail = string.match(message, "^(%S+)%s*(.-)%s*$")
-				if not command or string.lower(command) ~= "!pets" then
+				if not command then
 					return
 				end
+				command = string.lower(command)
 				local lower = string.lower(tail)
-				if lower == "clear" then
-					apply(player, {})
-				elseif lower == "list" then
-					local names = {}
-					for id in pairs(Catalog.Pets) do
-						table.insert(names, id)
+
+				if command == "!pets" then
+					if lower == "clear" then
+						report(player, partyService.SetParty(player, {}))
+					elseif lower == "list" then
+						print("[Pawlands Pets] Available: " .. table.concat(catalogNames(), ", "))
+					elseif tail == "" or lower == "help" then
+						help()
+					else
+						local requested = {}
+						for name in string.gmatch(tail, "[^,%s]+") do
+							table.insert(requested, name)
+						end
+						report(player, applyNames(player, requested))
 					end
-					table.sort(names)
-					print("[Pawlands Pets] Available: " .. table.concat(names, ", "))
-				elseif tail == "" or lower == "help" then
-					print("[Pawlands Pets] !pets Bunny Cat Dog Dragon | !pets clear | !pets list")
-				else
-					local requested = {}
-					for name in string.gmatch(tail, "[^,%s]+") do
-						table.insert(requested, name)
+				elseif command == "!petgrant" then
+					if tail == "" then
+						warn("[Pawlands Pets] Usage: !petgrant Bunny")
+						return
 					end
-					apply(player, requested)
+					local pet, reason = inventoryService.Grant(player, tail)
+					if pet then
+						print("[Pawlands Pets] Granted " .. pet.PetId .. " as " .. pet.Uid .. ".")
+						printInventory(player)
+					else
+						warn("[Pawlands Pets] " .. tostring(reason))
+					end
+				elseif command == "!petinventory" then
+					printInventory(player)
+				elseif command == "!petequip" then
+					if tail == "" then
+						warn("[Pawlands Pets] Usage: !petequip p1")
+						return
+					end
+					report(player, partyService.Equip(player, string.lower(tail)))
+				elseif command == "!petunequip" then
+					if tail == "" then
+						warn("[Pawlands Pets] Usage: !petunequip p1")
+						return
+					end
+					report(player, partyService.Unequip(player, string.lower(tail)))
+				elseif command == "!party" then
+					printParty(player)
+				elseif command == "!petreset" then
+					local ok, reason = partyService.SetParty(player, {})
+					if not ok then
+						warn("[Pawlands Pets] " .. tostring(reason))
+						return
+					end
+					local cleared, clearReason = inventoryService.Clear(player)
+					if cleared then
+						print("[Pawlands Pets] Session inventory and party cleared for " .. player.Name .. ".")
+					else
+						warn("[Pawlands Pets] " .. tostring(clearReason))
+					end
 				end
 			end)
 		end
 	end
+
 	Players.PlayerAdded:Connect(added)
 	Players.PlayerRemoving:Connect(function(player)
 		if connections[player] then
