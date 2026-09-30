@@ -22,6 +22,9 @@ return table.freeze({
 	AttackCancelGapSeconds = 0.00,
 	MaxConcurrentAttackers = 1,
 	AttackQueueRequestLifetimeSeconds = 1.00,
+	-- A slime must visually turn close enough to its primary opponent before a
+	-- strike can commit. The strike itself still locks its authored direction.
+	AttackFacingToleranceDegrees = 18,
 
 	-- Tutorial wind-up intentionally gives the Player a readable dodge window.
 	-- Target position/direction are locked when the strike begins; the lunge does

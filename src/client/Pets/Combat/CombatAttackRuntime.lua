@@ -81,7 +81,7 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 		if not isActive then
 			state.NextAttackAt = nil
 		end
-		return active, impact
+		return active, impact, state.AttackDirection, isActive
 	end
 
 	local arrivalDelta = horizontal(visual.Position - combatGoal)
@@ -91,7 +91,7 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 		if not isActive then
 			state.NextAttackAt = clock + Config.AttackInitialDelaySeconds + phaseOffset(petSlot)
 		end
-		return active, impact
+		return active, impact, state.AttackDirection, isActive
 	end
 
 	if not state.Ready then
@@ -108,7 +108,7 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 		end
 	end
 
-	return active, impact
+	return active, impact, state.AttackDirection, isActive
 end
 
 function CombatAttackRuntime.trim(states, partyCount)

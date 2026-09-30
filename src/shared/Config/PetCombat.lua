@@ -31,6 +31,13 @@ return table.freeze({
 	ReturnFollowSpeed = 4.8,
 	ReturnMaxSpeedStuds = 12.5,
 
+	-- Combat facing is state-aware: approach/retarget faces travel, settled pets
+	-- face the slime, and return faces the owner formation. Degree caps avoid
+	-- one-frame yaw snaps while keeping combat orientation responsive.
+	CombatTurnSpeedDegreesPerSecond = 480,
+	RetargetTurnSpeedDegreesPerSecond = 420,
+	ReturnTurnSpeedDegreesPerSecond = 360,
+
 	-- Pet attack presentation combines two useful reference ideas:
 	-- PS99: pets first settle into a stable target placement.
 	-- Slime RNG: attacks are short, locked-direction lunges that return to origin.

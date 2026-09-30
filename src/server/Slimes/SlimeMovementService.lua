@@ -483,7 +483,8 @@ local function stepAgent(agent, formationGoal, now, dt)
 		facingGoal = targetPosition
 	elseif agent.State == "Engage" and targetPosition then
 		facingGoal = targetPosition
-		if agent.CombatReady and now >= agent.NextAttackAt then
+		local facingReady = agent:IsFacing(targetPosition, CombatConfig.AttackFacingToleranceDegrees)
+		if agent.CombatReady and now >= agent.NextAttackAt and facingReady then
 			if SlimeAttackRuntime.Begin(agent, targetContext, now, CombatConfig) then
 				return
 			end

@@ -158,13 +158,17 @@ function Formation.resolveSpacing(goals, targetPositionsByPet)
 	return resolved
 end
 
-function Formation.facingYaw(fromPosition, targetPosition)
-	local direction = horizontal(targetPosition - fromPosition)
+function Formation.directionYaw(direction)
+	direction = horizontal(direction)
 	if direction.Magnitude <= 0.001 then
 		return nil
 	end
 	direction = direction.Unit
 	return math.atan2(-direction.X, -direction.Z)
+end
+
+function Formation.facingYaw(fromPosition, targetPosition)
+	return Formation.directionYaw(targetPosition - fromPosition)
 end
 
 return Formation

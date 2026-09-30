@@ -12,6 +12,36 @@ local function horizontalDistance(a, b)
 	return horizontal(a - b).Magnitude
 end
 
+local function yawFromDirection(direction)
+	direction = horizontal(direction)
+	if direction.Magnitude <= 0.001 then
+		return nil
+	end
+	direction = direction.Unit
+	return math.atan2(-direction.X, -direction.Z)
+end
+
+local function directionFromYaw(yaw)
+	return Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
+end
+
+local function boundedTurn(current, desired, maxDegreesPerSecond, dt)
+	local currentYaw = yawFromDirection(current)
+	local targetYaw = yawFromDirection(desired)
+	if not targetYaw then
+		return current
+	end
+	if not currentYaw then
+		return desired.Unit
+	end
+	local delta = (targetYaw - currentYaw + math.pi) % (2 * math.pi) - math.pi
+	local maxTurn = math.rad(math.max(0, maxDegreesPerSecond or 0)) * dt
+	if maxTurn <= 0 then
+		return desired.Unit
+	end
+	return directionFromYaw(currentYaw + math.clamp(delta, -maxTurn, maxTurn))
+end
+
 local function isCombatState(state)
 	return state == "Notice" or state == "Chase" or state == "Engage" or state == "Attack"
 end
@@ -202,10 +232,19 @@ function SlimeAgent:Step(goal, speed, agents, zone, dt, faceTargetPosition)
 		end
 		if desired.Magnitude > 0.001 then
 			desired = desired.Unit
-			local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
-			local facing = self.Facing:Lerp(desired, alpha)
-			if facing.Magnitude > 0.001 then
-				self.Facing = facing.Unit
+			if faceTargetPosition then
+				self.Facing = boundedTurn(
+					self.Facing,
+					desired,
+					self.Config.CombatTurnSpeedDegreesPerSecond,
+					dt
+				)
+			else
+				local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
+				local facing = self.Facing:Lerp(desired, alpha)
+				if facing.Magnitude > 0.001 then
+					self.Facing = facing.Unit
+				end
 			end
 		end
 	else
@@ -216,11 +255,12 @@ function SlimeAgent:Step(goal, speed, agents, zone, dt, faceTargetPosition)
 		if faceTargetPosition then
 			local desired = horizontal(faceTargetPosition - self.Position)
 			if desired.Magnitude > self.Config.CombatFacingDeadzone then
-				local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
-				local facing = self.Facing:Lerp(desired.Unit, alpha)
-				if facing.Magnitude > 0.001 then
-					self.Facing = facing.Unit
-				end
+				self.Facing = boundedTurn(
+					self.Facing,
+					desired.Unit,
+					self.Config.CombatTurnSpeedDegreesPerSecond,
+					dt
+				)
 			end
 		end
 	end
@@ -236,12 +276,27 @@ function SlimeAgent:FaceToward(worldPosition, dt)
 	if desired.Magnitude <= self.Config.CombatFacingDeadzone then
 		return
 	end
-	local alpha = 1 - math.exp(-self.Config.TurnSpeed * dt)
-	local facing = self.Facing:Lerp(desired.Unit, alpha)
-	if facing.Magnitude > 0.001 then
-		self.Facing = facing.Unit
-	end
+	self.Facing = boundedTurn(
+		self.Facing,
+		desired.Unit,
+		self.Config.CombatTurnSpeedDegreesPerSecond,
+		dt
+	)
 	self:_applyPose(self.Position, 0, self.Facing)
+end
+
+function SlimeAgent:IsFacing(worldPosition, toleranceDegrees)
+	local desired = horizontal(worldPosition - self.Position)
+	if desired.Magnitude <= self.Config.CombatFacingDeadzone then
+		return true
+	end
+	local current = horizontal(self.Facing)
+	if current.Magnitude <= 0.001 then
+		return false
+	end
+	local dot = math.clamp(current.Unit:Dot(desired.Unit), -1, 1)
+	local tolerance = math.rad(math.max(0, toleranceDegrees or 0))
+	return dot >= math.cos(tolerance)
 end
 
 function SlimeAgent:Destroy()

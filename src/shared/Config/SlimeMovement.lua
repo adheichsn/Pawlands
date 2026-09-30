@@ -22,6 +22,9 @@ return table.freeze({
 	IdleSeparationSpeed = 2.8,
 	Acceleration = 11,
 	TurnSpeed = 10,
+	-- Combat target-facing uses a bounded yaw rate instead of vector lerp so
+	-- 180-degree opponent handoffs rotate predictably rather than snapping.
+	CombatTurnSpeedDegreesPerSecond = 420,
 	ArrivalRadius = 1.15,
 
 	IdleMinSeconds = 2.5,

@@ -179,7 +179,7 @@ function PetFollowController.Start()
 				local followGoal = frame:PointToWorldSpace(Vector3.new(x, 0, z))
 				local combatGoal = combatGoals[slot]
 				local targetToken = targetModels[slot]
-				local target, motionProfile, holding = CombatTransitionRuntime.step(
+				local target, motionProfile, holding, transitionMode = CombatTransitionRuntime.step(
 					entry.CombatTransitionStates,
 					slot,
 					visual.Position,
@@ -192,9 +192,10 @@ function PetFollowController.Start()
 				local targetYaw = yaw
 				local attackOffset = Vector3.zero
 				local impact = false
+				local attackDirection = nil
+				local attackActive = false
 				if combatGoal and targetToken and not holding then
-					targetYaw = CombatFormation.facingYaw(combatGoal, targetPositionsByPet[slot]) or yaw
-					attackOffset, impact = CombatAttackRuntime.step(
+					attackOffset, impact, attackDirection, attackActive = CombatAttackRuntime.step(
 						entry.CombatAttackStates,
 						slot,
 						visual,
@@ -204,15 +205,35 @@ function PetFollowController.Start()
 						clock
 					)
 				else
-					if holding and visual.Yaw then
-						targetYaw = visual.Yaw
-					end
-					attackOffset, impact = CombatAttackRuntime.step(
+					attackOffset, impact, attackDirection, attackActive = CombatAttackRuntime.step(
 						entry.CombatAttackStates, slot, visual, nil, nil, nil, clock
 					)
 					if holding then
 						impact = false
 					end
+				end
+
+				-- Facing follows the current combat state instead of one universal rule.
+				-- Approach/retarget faces travel, settled pets face the slime, attack
+				-- keeps its locked lunge direction, and return faces the follow goal.
+				if attackActive and attackDirection then
+					targetYaw = CombatFormation.directionYaw(attackDirection) or visual.Yaw or yaw
+				elseif holding and visual.Yaw then
+					targetYaw = visual.Yaw
+				elseif combatGoal and targetToken and visual.Position then
+					local toCombatGoal = Vector3.new(
+						combatGoal.X - visual.Position.X,
+						0,
+						combatGoal.Z - visual.Position.Z
+					)
+					if toCombatGoal.Magnitude > CombatConfig.AttackReadyRadiusStuds then
+						targetYaw = CombatFormation.facingYaw(visual.Position, combatGoal) or visual.Yaw or yaw
+					else
+						targetYaw = CombatFormation.facingYaw(visual.Position, targetPositionsByPet[slot])
+							or visual.Yaw or yaw
+					end
+				elseif transitionMode == "Return" and visual.Position and target then
+					targetYaw = CombatFormation.facingYaw(visual.Position, target) or visual.Yaw or yaw
 				end
 
 				if impact and player == Players.LocalPlayer then

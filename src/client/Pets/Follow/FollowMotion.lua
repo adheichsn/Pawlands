@@ -6,6 +6,15 @@ local function alpha(speed, dt)
 	return 1 - math.exp(-speed * dt)
 end
 
+local function turnYaw(currentYaw, targetYaw, dt, maxDegreesPerSecond)
+	local turn = (targetYaw - currentYaw + math.pi) % (2 * math.pi) - math.pi
+	if maxDegreesPerSecond and maxDegreesPerSecond > 0 then
+		local maxTurn = math.rad(maxDegreesPerSecond) * dt
+		return currentYaw + math.clamp(turn, -maxTurn, maxTurn)
+	end
+	return currentYaw + turn * alpha(Config.TurnSpeed, dt)
+end
+
 function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, recall, presentationOffset, motionProfile)
 	local targetY = probe:Height(target.X, target.Z, root.Position.Y)
 	if not targetY then
@@ -56,8 +65,8 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 
 	local yaw = targetYaw
 	visual.Yaw = visual.Yaw or yaw
-	local turn = (yaw - visual.Yaw + math.pi) % (2 * math.pi) - math.pi
-	visual.Yaw += turn * alpha(Config.TurnSpeed, dt)
+	local turnSpeed = motionProfile and motionProfile.TurnSpeedDegreesPerSecond
+	visual.Yaw = turnYaw(visual.Yaw, yaw, dt, turnSpeed)
 	local time = clock + visual.Phase
 	local bob = (math.sin(time * Config.IdleFrequency) + 1) * Config.IdleBob
 	local pitch = 0

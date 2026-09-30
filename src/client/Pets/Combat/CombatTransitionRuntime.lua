@@ -47,18 +47,24 @@ function CombatTransitionRuntime.step(states, slot, visualPosition, targetToken,
 		return visualPosition, {
 			FollowSpeed = Config.ReturnFollowSpeed,
 			MaxHorizontalSpeed = 0,
-		}, true
+			TurnSpeedDegreesPerSecond = Config.ReturnTurnSpeedDegreesPerSecond,
+		}, true, state.Mode
 	end
 
 	if targetToken ~= nil and combatGoal then
-		local maxSpeed = state.Mode == "Retarget"
+		local movementMode = state.Mode == "Retarget" and "Retarget" or "Combat"
+		local maxSpeed = movementMode == "Retarget"
 			and Config.RetargetMaxSpeedStuds
 			or Config.CombatApproachMaxSpeedStuds
+		local turnSpeed = movementMode == "Retarget"
+			and Config.RetargetTurnSpeedDegreesPerSecond
+			or Config.CombatTurnSpeedDegreesPerSecond
 		state.Mode = "Combat"
 		return combatGoal, {
 			FollowSpeed = Config.CombatApproachFollowSpeed,
 			MaxHorizontalSpeed = maxSpeed,
-		}, false
+			TurnSpeedDegreesPerSecond = turnSpeed,
+		}, false, movementMode
 	end
 
 	if state.HadCombat then
@@ -69,15 +75,16 @@ function CombatTransitionRuntime.step(states, slot, visualPosition, targetToken,
 			state.HadCombat = false
 			state.Mode = "Follow"
 			state.HoldUntil = 0
-			return followGoal, nil, false
+			return followGoal, nil, false, "Follow"
 		end
 		return followGoal, {
 			FollowSpeed = Config.ReturnFollowSpeed,
 			MaxHorizontalSpeed = Config.ReturnMaxSpeedStuds,
-		}, false
+			TurnSpeedDegreesPerSecond = Config.ReturnTurnSpeedDegreesPerSecond,
+		}, false, "Return"
 	end
 
-	return followGoal, nil, false
+	return followGoal, nil, false, "Follow"
 end
 
 function CombatTransitionRuntime.trim(states, partyCount)
