@@ -1,6 +1,8 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.SlimeCombat)
+local FeedbackConfig = require(Shared.Config.SlimeFeedback)
 
 local SlimeHealth = {}
 
@@ -8,7 +10,12 @@ function SlimeHealth.Initialize(model)
 	model:SetAttribute("MaxHealth", Config.MaxHealth)
 	model:SetAttribute("Health", Config.MaxHealth)
 	model:SetAttribute("Defeated", false)
+	model:SetAttribute("DefeatedAt", 0)
 	model:SetAttribute("LastHitUserId", 0)
+	model:SetAttribute("LastHitDamage", 0)
+	model:SetAttribute("LastHitDirection", Vector3.zero)
+	model:SetAttribute("LastHitFeedbackTier", FeedbackConfig.FeedbackTiers.Light)
+	model:SetAttribute("HitSerial", 0)
 end
 
 function SlimeHealth.IsAlive(model)
@@ -17,15 +24,33 @@ function SlimeHealth.IsAlive(model)
 		and (model:GetAttribute("Health") or 0) > 0
 end
 
-function SlimeHealth.ApplyDamage(model, amount, player)
+function SlimeHealth.ApplyDamage(model, amount, player, feedback)
 	if not SlimeHealth.IsAlive(model) then
 		return false, 0
 	end
+
+	local appliedDamage = math.max(0, amount)
 	local current = model:GetAttribute("Health") or Config.MaxHealth
-	local nextHealth = math.max(0, current - math.max(0, amount))
-	model:SetAttribute("Health", nextHealth)
+	local nextHealth = math.max(0, current - appliedDamage)
+	local feedbackTier = feedback and feedback.Tier
+	if feedbackTier ~= FeedbackConfig.FeedbackTiers.Finisher then
+		feedbackTier = FeedbackConfig.FeedbackTiers.Light
+	end
+	local feedbackDirection = feedback and feedback.Direction
+	if typeof(feedbackDirection) ~= "Vector3" then
+		feedbackDirection = Vector3.zero
+	end
+
+	-- Publish metadata before HitSerial so clients can treat the serial as the
+	-- committed presentation event and read a complete snapshot for that impact.
 	model:SetAttribute("LastHitUserId", player and player.UserId or 0)
+	model:SetAttribute("LastHitDamage", appliedDamage)
+	model:SetAttribute("LastHitDirection", feedbackDirection)
+	model:SetAttribute("LastHitFeedbackTier", feedbackTier)
+	model:SetAttribute("Health", nextHealth)
+
 	if nextHealth <= 0 then
+		model:SetAttribute("DefeatedAt", Workspace:GetServerTimeNow())
 		model:SetAttribute("Defeated", true)
 		model:SetAttribute("CombatReady", false)
 		model:SetAttribute("AttackQueued", false)
@@ -33,6 +58,8 @@ function SlimeHealth.ApplyDamage(model, amount, player)
 		model:SetAttribute("TargetUserId", 0)
 		model:SetAttribute("SlimeState", "Defeated")
 	end
+
+	model:SetAttribute("HitSerial", (model:GetAttribute("HitSerial") or 0) + 1)
 	return true, nextHealth
 end
 

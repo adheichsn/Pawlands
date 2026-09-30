@@ -89,7 +89,7 @@ local function resolveAction(state, actionType, comboIndex, now)
 	return definition, Config.GetComboImpactDelay(comboIndex), definition.DamageMultiplier
 end
 
-local function applyImpact(player, generation, aimDirection, preferredTarget, damageMultiplier)
+local function applyImpact(player, generation, aimDirection, preferredTarget, damageMultiplier, feedbackTier)
 	local state = stateByPlayer[player]
 	if not state or state.Generation ~= generation then
 		return
@@ -117,7 +117,21 @@ local function applyImpact(player, generation, aimDirection, preferredTarget, da
 	end
 
 	local damage = math.max(1, math.floor(Config.Damage * damageMultiplier + 0.5))
-	local applied, health = SlimeHealth.ApplyDamage(target, damage, player)
+	local targetPosition = target:GetPivot().Position
+	local hitDirection = Vector3.new(
+		targetPosition.X - playerState.Root.Position.X,
+		0,
+		targetPosition.Z - playerState.Root.Position.Z
+	)
+	if hitDirection.Magnitude > 0.001 then
+		hitDirection = hitDirection.Unit
+	else
+		hitDirection = aim
+	end
+	local applied, health = SlimeHealth.ApplyDamage(target, damage, player, {
+		Tier = feedbackTier,
+		Direction = hitDirection,
+	})
 	if applied and RunService:IsStudio() then
 		print(string.format(
 			"[Pawlands Combat] %s hit %s for %d damage (%d/%d HP).",
@@ -159,6 +173,10 @@ local function processAttack(player, actionType, comboIndex, aimDirection, prefe
 	state.Generation += 1
 	local generation = state.Generation
 	local boundedAim = CombatValidation.ResolveAim(playerState.Root, aimDirection, Config)
+	local feedbackTier = "Light"
+	if actionType == Config.ActionTypes.M1 and comboIndex == #Config.Combo then
+		feedbackTier = "Finisher"
+	end
 	local validPreferred = nil
 	local folder = runtimeFolder()
 	if folder and CombatValidation.ValidateTarget(preferredTarget, folder, SlimeHealth) then
@@ -166,7 +184,7 @@ local function processAttack(player, actionType, comboIndex, aimDirection, prefe
 	end
 
 	task.delay(math.max(0, impactDelay), function()
-		applyImpact(player, generation, boundedAim, validPreferred, multiplier or 1)
+		applyImpact(player, generation, boundedAim, validPreferred, multiplier or 1, feedbackTier)
 	end)
 end
 

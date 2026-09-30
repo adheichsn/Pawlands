@@ -3,14 +3,17 @@ local PlayerMovementController = require(script.Parent.Player.PlayerMovementCont
 local PlayerCombatController = require(script.Parent.Combat.PlayerCombatController)
 local PlayerHitReactionController = require(script.Parent.Combat.PlayerHitReactionController)
 local SlimeHealthbarController = require(script.Parent.Slimes.SlimeHealthbarController)
+local SlimeFeedbackController = require(script.Parent.Slimes.SlimeFeedbackController)
 
 PetFollowController.Start()
 PlayerMovementController.Start()
 PlayerCombatController.Start()
 PlayerHitReactionController.Start()
 SlimeHealthbarController.Start()
+SlimeFeedbackController.Start()
 
 script.Destroying:Connect(function()
+	SlimeFeedbackController.Stop()
 	SlimeHealthbarController.Stop()
 	PlayerHitReactionController.Stop()
 	PlayerCombatController.Stop()
