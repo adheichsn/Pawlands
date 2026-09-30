@@ -1,7 +1,9 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
-local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
+local Pawlands = ReplicatedStorage:WaitForChild("Pawlands")
+local Shared = Pawlands:WaitForChild("Shared")
 local Config = require(Shared.Config.PetFollow)
 local Observer = require(script.Parent.PartyObserver)
 local Formation = require(script.Parent.Follow.Formation)
@@ -38,6 +40,8 @@ function PetFollowController.Start()
 	if stopCurrent then
 		return
 	end
+	local remotes = Pawlands:WaitForChild(CombatConfig.RemoteFolderName)
+	local petImpactRemote = remotes:WaitForChild(CombatConfig.AttackImpactRemoteName)
 	local folder = Instance.new("Folder")
 	folder.Name = Config.VisualFolderName
 	folder.Parent = Workspace
@@ -163,9 +167,10 @@ function PetFollowController.Start()
 				local target = combatGoals[slot]
 				local targetYaw
 				local attackOffset = Vector3.zero
+				local impact = false
 				if target then
 					targetYaw = CombatFormation.facingYaw(target, targetPositionsByPet[slot])
-					attackOffset = CombatAttackRuntime.step(
+					attackOffset, impact = CombatAttackRuntime.step(
 						entry.CombatAttackStates,
 						slot,
 						visual,
@@ -178,9 +183,15 @@ function PetFollowController.Start()
 					local x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
 					target = frame:PointToWorldSpace(Vector3.new(x, 0, z))
 					targetYaw = yaw
-					attackOffset = CombatAttackRuntime.step(
+					attackOffset, impact = CombatAttackRuntime.step(
 						entry.CombatAttackStates, slot, visual, nil, nil, nil, clock
 					)
+				end
+				if impact and player == Players.LocalPlayer then
+					local slimeSlot = validAssignments[slot]
+					if slimeSlot then
+						petImpactRemote:FireServer(slot, slimeSlot)
+					end
 				end
 				if Motion.step(visual, target, root, targetYaw or yaw, dt, clock, probe, recall, attackOffset) then
 					visual.Model.Parent = folder

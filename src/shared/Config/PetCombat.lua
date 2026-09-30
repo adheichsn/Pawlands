@@ -28,4 +28,14 @@ return table.freeze({
 	AttackLungeStuds = 3.0,
 	GroundAttackHopStuds = 0.52,
 	FlyingAttackHopStuds = 0.16,
+
+	-- The client reports only the authored visual impact beat. The server owns
+	-- assignment validation, KO/leash checks, cadence, target resolution, and
+	-- damage, so a client cannot choose a victim or damage amount.
+	AttackImpactAlpha = 0.50,
+	DefaultDamage = 12,
+	ServerImpactCadenceToleranceSeconds = 0.12,
+	ServerImpactLeashPaddingStuds = 2.0,
+	RemoteFolderName = "Remotes",
+	AttackImpactRemoteName = "PetAttackImpact",
 })

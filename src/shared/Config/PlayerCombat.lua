@@ -37,10 +37,14 @@ local PlayerCombat = {
 	-- a forged request cannot rotate the authoritative hit volume behind the player.
 	ServerAimRootMaxDegrees = 95,
 
+	-- Pets now occupy the immediate melee lane around a slime. Keep the player
+	-- fist server-authoritative and directional, but give the handler enough
+	-- reach/width to assist from just behind or beside an attacking pet instead
+	-- of requiring character-body overlap with the target.
 	Hitbox = table.freeze({
-		ForwardReachStuds = 4.75,
-		HalfWidthStuds = 2.25,
-		RearToleranceStuds = 0.35,
+		ForwardReachStuds = 6.25,
+		HalfWidthStuds = 2.90,
+		RearToleranceStuds = 0.45,
 		MinimumAimMagnitude = 0.05,
 	}),
 

@@ -109,7 +109,9 @@ local function beginHit(record)
 
 	restoreHitPose(record)
 	resolveBodyMotor(record)
-	CombatEffects.PlayPlayerHitSlime(record.Model, record.Model:GetAttribute("HitSerial"))
+	if record.Model:GetAttribute("LastHitSourceType") ~= "Pet" then
+		CombatEffects.PlayPlayerHitSlime(record.Model, record.Model:GetAttribute("HitSerial"))
+	end
 	record.HitTier = tier
 	record.HitDirection = direction
 	record.HitStartedAt = os.clock()

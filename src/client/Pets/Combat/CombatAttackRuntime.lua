@@ -17,13 +17,15 @@ local function resetForTarget(state, targetToken, clock, petSlot)
 	state.NextAttackAt = clock + Config.AttackInitialDelaySeconds + phaseOffset(petSlot)
 end
 
-local function beginAttack(state, visualPosition, targetPosition, clock)
+local function beginAttack(state, visualPosition, targetPosition, targetToken, clock)
 	local direction = horizontal(targetPosition - visualPosition)
 	if direction.Magnitude <= 0.001 then
 		return false
 	end
 	state.AttackStartedAt = clock
 	state.AttackDirection = direction.Unit
+	state.AttackTargetToken = targetToken
+	state.ImpactSent = false
 	return true
 end
 
@@ -31,7 +33,7 @@ local function activeOffset(state, clock, flying)
 	local startedAt = state.AttackStartedAt
 	local direction = state.AttackDirection
 	if not startedAt or not direction then
-		return Vector3.zero, false
+		return Vector3.zero, false, 0
 	end
 
 	local duration = math.max(Config.AttackDurationSeconds, 0.01)
@@ -39,12 +41,15 @@ local function activeOffset(state, clock, flying)
 	if progress >= 1 then
 		state.AttackStartedAt = nil
 		state.AttackDirection = nil
-		return Vector3.zero, false
+		state.AttackTargetToken = nil
+		state.ImpactSent = false
+		return Vector3.zero, false, 1
 	end
 
-	local wave = math.sin(math.clamp(progress, 0, 1) * math.pi)
+	local clampedProgress = math.clamp(progress, 0, 1)
+	local wave = math.sin(clampedProgress * math.pi)
 	local hop = flying and Config.FlyingAttackHopStuds or Config.GroundAttackHopStuds
-	return direction * (wave * Config.AttackLungeStuds) + Vector3.new(0, wave * hop, 0), true
+	return direction * (wave * Config.AttackLungeStuds) + Vector3.new(0, wave * hop, 0), true, clampedProgress
 end
 
 function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPosition, combatGoal, clock)
@@ -55,7 +60,17 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 	end
 
 	local flying = visual.Definition.Movement == "Flying"
-	local active, isActive = activeOffset(state, clock, flying)
+	local active, isActive, progress = activeOffset(state, clock, flying)
+	local impact = false
+
+	if isActive
+		and not state.ImpactSent
+		and state.AttackTargetToken == targetToken
+		and progress >= Config.AttackImpactAlpha
+	then
+		state.ImpactSent = true
+		impact = true
+	end
 
 	if targetToken ~= state.TargetToken then
 		resetForTarget(state, targetToken, clock, petSlot)
@@ -66,7 +81,7 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 		if not isActive then
 			state.NextAttackAt = nil
 		end
-		return active
+		return active, impact
 	end
 
 	local arrivalDelta = horizontal(visual.Position - combatGoal)
@@ -76,7 +91,7 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 		if not isActive then
 			state.NextAttackAt = clock + Config.AttackInitialDelaySeconds + phaseOffset(petSlot)
 		end
-		return active
+		return active, impact
 	end
 
 	if not state.Ready then
@@ -87,13 +102,13 @@ function CombatAttackRuntime.step(states, petSlot, visual, targetToken, targetPo
 	end
 
 	if not isActive and state.NextAttackAt and clock >= state.NextAttackAt then
-		if beginAttack(state, visual.Position, targetPosition, clock) then
+		if beginAttack(state, visual.Position, targetPosition, targetToken, clock) then
 			state.NextAttackAt = clock + Config.AttackCadenceSeconds
-			active = activeOffset(state, clock, flying)
+			active, isActive, progress = activeOffset(state, clock, flying)
 		end
 	end
 
-	return active
+	return active, impact
 end
 
 function CombatAttackRuntime.trim(states, partyCount)

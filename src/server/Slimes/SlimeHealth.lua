@@ -12,6 +12,8 @@ function SlimeHealth.Initialize(model)
 	model:SetAttribute("Defeated", false)
 	model:SetAttribute("DefeatedAt", 0)
 	model:SetAttribute("LastHitUserId", 0)
+	model:SetAttribute("LastHitSourceType", "None")
+	model:SetAttribute("LastHitSourceUid", "")
 	model:SetAttribute("LastHitDamage", 0)
 	model:SetAttribute("LastHitDirection", Vector3.zero)
 	model:SetAttribute("LastHitFeedbackTier", FeedbackConfig.FeedbackTiers.Light)
@@ -43,7 +45,11 @@ function SlimeHealth.ApplyDamage(model, amount, player, feedback)
 
 	-- Publish metadata before HitSerial so clients can treat the serial as the
 	-- committed presentation event and read a complete snapshot for that impact.
+	local sourceType = feedback and feedback.SourceType == "Pet" and "Pet" or "Player"
+	local sourceUid = sourceType == "Pet" and tostring(feedback and feedback.SourceUid or "") or ""
 	model:SetAttribute("LastHitUserId", player and player.UserId or 0)
+	model:SetAttribute("LastHitSourceType", sourceType)
+	model:SetAttribute("LastHitSourceUid", sourceUid)
 	model:SetAttribute("LastHitDamage", appliedDamage)
 	model:SetAttribute("LastHitDirection", feedbackDirection)
 	model:SetAttribute("LastHitFeedbackTier", feedbackTier)

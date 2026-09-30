@@ -1,16 +1,20 @@
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
-local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
+local Pawlands = ReplicatedStorage:WaitForChild("Pawlands")
+local Shared = Pawlands:WaitForChild("Shared")
 local Config = require(Shared.Config.PetCombat)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local Codec = require(Shared.Pets.PetCombatCodec)
 local CombatFormation = require(Shared.Pets.PetCombatFormation)
+local SlimeHealth = require(script.Parent.Parent.Slimes.SlimeHealth)
 
 local PetCombatService = {}
 local started = false
 local heartbeatConnection
+local impactConnection
 local addedConnection
 local removingConnection
 local partyService
@@ -24,6 +28,31 @@ local COMBAT_STATES = table.freeze({
 	Engage = true,
 	Attack = true,
 })
+
+local function ensureImpactRemote()
+	local folder = Pawlands:FindFirstChild(Config.RemoteFolderName)
+	if folder and not folder:IsA("Folder") then
+		folder:Destroy()
+		folder = nil
+	end
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = Config.RemoteFolderName
+		folder.Parent = Pawlands
+	end
+
+	local remote = folder:FindFirstChild(Config.AttackImpactRemoteName)
+	if remote and not remote:IsA("RemoteEvent") then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = Config.AttackImpactRemoteName
+		remote.Parent = folder
+	end
+	return remote
+end
 
 local function getRoot(player)
 	local character = player.Character
@@ -168,6 +197,113 @@ local function buildCombatTargets(player, party, assignments, state, root)
 	return serializable
 end
 
+local function syncAttackGuards(state, clock)
+	local activeSlots = {}
+	for petSlot, entry in pairs(state.CombatTargets or {}) do
+		activeSlots[petSlot] = true
+		local guard = state.AttackGuards[petSlot]
+		if not guard
+			or guard.Uid ~= entry.Uid
+			or guard.SlimeModel ~= entry.SlimeModel
+			or guard.SlimeSlot ~= entry.SlimeSlot
+		then
+			state.AttackGuards[petSlot] = {
+				Uid = entry.Uid,
+				SlimeModel = entry.SlimeModel,
+				SlimeSlot = entry.SlimeSlot,
+				NextImpactAt = clock
+					+ Config.AttackInitialDelaySeconds
+					+ math.max(0, petSlot - 1) * Config.AttackStaggerSeconds,
+			}
+		end
+	end
+	for petSlot in pairs(state.AttackGuards) do
+		if not activeSlots[petSlot] then
+			state.AttackGuards[petSlot] = nil
+		end
+	end
+end
+
+local function horizontalDirection(fromPosition, toPosition)
+	local direction = Vector3.new(
+		toPosition.X - fromPosition.X,
+		0,
+		toPosition.Z - fromPosition.Z
+	)
+	if direction.Magnitude <= 0.001 then
+		return Vector3.zero
+	end
+	return direction.Unit
+end
+
+local function processImpact(player, petSlot, slimeSlot)
+	if not started or player.Parent ~= Players then
+		return
+	end
+	if type(petSlot) ~= "number" or type(slimeSlot) ~= "number" then
+		return
+	end
+	petSlot = math.floor(petSlot)
+	slimeSlot = math.floor(slimeSlot)
+	if petSlot < 1 or slimeSlot < 1 then
+		return
+	end
+
+	local state = stateByPlayer[player]
+	local entry = state and state.CombatTargets and state.CombatTargets[petSlot]
+	local guard = state and state.AttackGuards and state.AttackGuards[petSlot]
+	if not entry or not guard then
+		return
+	end
+	if entry.SlimeSlot ~= slimeSlot
+		or guard.SlimeSlot ~= slimeSlot
+		or guard.SlimeModel ~= entry.SlimeModel
+		or guard.Uid ~= entry.Uid
+	then
+		return
+	end
+
+	local root = getRoot(player)
+	if not root or not isActiveTarget(entry.SlimeModel, player) then
+		return
+	end
+	local slimePosition = entry.SlimeModel:GetPivot().Position
+	if (slimePosition - root.Position).Magnitude
+		> Config.HardLeashStuds + Config.ServerImpactLeashPaddingStuds
+	then
+		return
+	end
+	if not vitalsService or not vitalsService.CanCombat(player, entry.Uid) then
+		return
+	end
+
+	local clock = os.clock()
+	if clock + Config.ServerImpactCadenceToleranceSeconds < guard.NextImpactAt then
+		return
+	end
+	guard.NextImpactAt = clock + Config.AttackCadenceSeconds
+
+	local damage = math.max(1, math.floor((tonumber(Config.DefaultDamage) or 1) + 0.5))
+	local hitDirection = horizontalDirection(entry.Position, slimePosition)
+	local applied, health = SlimeHealth.ApplyDamage(entry.SlimeModel, damage, player, {
+		Tier = "Light",
+		Direction = hitDirection,
+		SourceType = "Pet",
+		SourceUid = entry.Uid,
+	})
+	if applied and RunService:IsStudio() then
+		print(string.format(
+			"[Pawlands PetCombat] %s pet %s hit %s for %d damage (%d/%d HP).",
+			player.Name,
+			tostring(entry.Uid),
+			tostring(entry.SlimeModel:GetAttribute("SlimeId") or entry.SlimeModel.Name),
+			damage,
+			health,
+			entry.SlimeModel:GetAttribute("MaxHealth") or health
+		))
+	end
+end
+
 local function stepPlayer(player)
 	local root = getRoot(player)
 	local party = partyService.GetParty(player)
@@ -183,6 +319,7 @@ local function stepPlayer(player)
 			Published = nil,
 			CombatAnchors = {},
 			CombatTargets = {},
+			AttackGuards = {},
 		}
 		stateByPlayer[player] = state
 	end
@@ -250,6 +387,7 @@ local function stepPlayer(player)
 
 	state.Assignments = nextAssignments
 	local serializable = buildCombatTargets(player, party, nextAssignments, state, root)
+	syncAttackGuards(state, os.clock())
 	state.Published = publish(player, serializable, state.Published)
 end
 
@@ -285,6 +423,8 @@ function PetCombatService.Start(petPartyService, petVitalsService)
 		error("PetCombatService requires PetPartyService and PetVitalsService.")
 	end
 	started = true
+	local impactRemote = ensureImpactRemote()
+	impactConnection = impactRemote.OnServerEvent:Connect(processImpact)
 	addedConnection = Players.PlayerAdded:Connect(initializePlayer)
 	removingConnection = Players.PlayerRemoving:Connect(function(player)
 		stateByPlayer[player] = nil
@@ -313,6 +453,10 @@ function PetCombatService.Stop()
 	if heartbeatConnection then
 		heartbeatConnection:Disconnect()
 		heartbeatConnection = nil
+	end
+	if impactConnection then
+		impactConnection:Disconnect()
+		impactConnection = nil
 	end
 	if addedConnection then
 		addedConnection:Disconnect()
