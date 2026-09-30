@@ -18,7 +18,7 @@ local function catalogNames()
 	return names
 end
 
-function StudioPetPreview.Start(partyService, inventoryService)
+function StudioPetPreview.Start(partyService, inventoryService, vitalsService)
 	if started or not RunService:IsStudio() then
 		return
 	end
@@ -47,6 +47,46 @@ function StudioPetPreview.Start(partyService, inventoryService)
 			table.insert(entries, pet.Uid .. "=" .. pet.PetId .. "/" .. pet.Variant .. marker)
 		end
 		print("[Pawlands Pets] Inventory " .. player.Name .. ": " .. (#entries > 0 and table.concat(entries, ", ") or "empty"))
+	end
+
+	local function formatVitals(vitals)
+		if not vitals then
+			return "unavailable"
+		end
+		local recover = vitals.KO and math.max(0, vitals.RecoverAt - workspace:GetServerTimeNow()) or 0
+		return string.format(
+			"%s %.0f/%.0f state=%s KO=%s recover=%.1fs",
+			vitals.Uid,
+			vitals.Health,
+			vitals.MaxHealth,
+			vitals.CombatState,
+			tostring(vitals.KO),
+			recover
+		)
+	end
+
+	local function printVitals(player, requestedUid)
+		if not vitalsService then
+			warn("[Pawlands Pets] Pet vitals service is unavailable.")
+			return
+		end
+		if requestedUid and requestedUid ~= "" then
+			local vitals, reason = vitalsService.GetSnapshot(player, string.lower(requestedUid))
+			if vitals then
+				print("[Pawlands Pets] Vitals " .. player.Name .. ": " .. formatVitals(vitals))
+			else
+				warn("[Pawlands Pets] " .. tostring(reason))
+			end
+			return
+		end
+		local entries = {}
+		for _, pet in ipairs(inventoryService.GetInventory(player)) do
+			local vitals = vitalsService.GetSnapshot(player, pet.Uid)
+			if vitals then
+				table.insert(entries, formatVitals(vitals))
+			end
+		end
+		print("[Pawlands Pets] Vitals " .. player.Name .. ": " .. (#entries > 0 and table.concat(entries, " | ") or "empty"))
 	end
 
 	local function ensureOwned(player, petId)
@@ -86,6 +126,7 @@ function StudioPetPreview.Start(partyService, inventoryService)
 	local function help()
 		print("[Pawlands Pets] !pets Bunny Cat Dog Dragon | !pets clear | !pets list")
 		print("[Pawlands Pets] !petgrant Bunny | !petinventory | !petequip p1 | !petunequip p1 | !party | !petreset")
+		print("[Pawlands Pets] !petvitals [p1] | !pethurt p1 25 | !petko p1 | !petheal p1")
 	end
 
 	local function added(player)
@@ -126,6 +167,9 @@ function StudioPetPreview.Start(partyService, inventoryService)
 					end
 					local pet, reason = inventoryService.Grant(player, tail)
 					if pet then
+						if vitalsService then
+							vitalsService.GetSnapshot(player, pet.Uid)
+						end
 						print("[Pawlands Pets] Granted " .. pet.PetId .. " as " .. pet.Uid .. ".")
 						printInventory(player)
 					else
@@ -147,6 +191,49 @@ function StudioPetPreview.Start(partyService, inventoryService)
 					report(player, partyService.Unequip(player, string.lower(tail)))
 				elseif command == "!party" then
 					printParty(player)
+				elseif command == "!petvitals" then
+					printVitals(player, tail)
+				elseif command == "!pethurt" then
+					local uid, amountText = string.match(tail, "^(%S+)%s+(%S+)$")
+					local amount = tonumber(amountText)
+					if not uid or not amount then
+						warn("[Pawlands Pets] Usage: !pethurt p1 25")
+					elseif not vitalsService then
+						warn("[Pawlands Pets] Pet vitals service is unavailable.")
+					else
+						local ok, vitals, reason = vitalsService.ApplyDamage(player, string.lower(uid), amount)
+						if ok then
+							print("[Pawlands Pets] Hurt " .. formatVitals(vitals))
+						else
+							warn("[Pawlands Pets] " .. tostring(reason))
+						end
+					end
+				elseif command == "!petko" then
+					if tail == "" then
+						warn("[Pawlands Pets] Usage: !petko p1")
+					elseif not vitalsService then
+						warn("[Pawlands Pets] Pet vitals service is unavailable.")
+					else
+						local ok, vitals, reason = vitalsService.KnockOut(player, string.lower(tail))
+						if ok then
+							print("[Pawlands Pets] KO " .. formatVitals(vitals))
+						else
+							warn("[Pawlands Pets] " .. tostring(reason))
+						end
+					end
+				elseif command == "!petheal" then
+					if tail == "" then
+						warn("[Pawlands Pets] Usage: !petheal p1")
+					elseif not vitalsService then
+						warn("[Pawlands Pets] Pet vitals service is unavailable.")
+					else
+						local ok, vitals, reason = vitalsService.Restore(player, string.lower(tail))
+						if ok then
+							print("[Pawlands Pets] Healed " .. formatVitals(vitals))
+						else
+							warn("[Pawlands Pets] " .. tostring(reason))
+						end
+					end
 				elseif command == "!petreset" then
 					local ok, reason = partyService.SetParty(player, {})
 					if not ok then
@@ -155,6 +242,9 @@ function StudioPetPreview.Start(partyService, inventoryService)
 					end
 					local cleared, clearReason = inventoryService.Clear(player)
 					if cleared then
+						if vitalsService then
+							vitalsService.Clear(player)
+						end
 						print("[Pawlands Pets] Session inventory and party cleared for " .. player.Name .. ".")
 					else
 						warn("[Pawlands Pets] " .. tostring(clearReason))

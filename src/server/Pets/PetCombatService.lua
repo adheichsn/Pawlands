@@ -13,6 +13,7 @@ local heartbeatConnection
 local addedConnection
 local removingConnection
 local partyService
+local vitalsService
 local stateByPlayer = {}
 local accumulator = 0
 
@@ -85,6 +86,9 @@ local function collectTargets(player, root)
 end
 
 local function clearPlayer(player)
+	if vitalsService then
+		vitalsService.ReleaseCombat(player)
+	end
 	stateByPlayer[player] = nil
 	if player.Parent == Players then
 		player:SetAttribute(Config.AssignmentAttributeName, "")
@@ -122,7 +126,9 @@ local function stepPlayer(player)
 	local nextAssignments = {}
 	local counts = {}
 	for petSlot = 1, #party do
-		local targetModel = state.Assignments[petSlot]
+		local uid = party[petSlot]
+		local canCombat = not vitalsService or vitalsService.CanCombat(player, uid)
+		local targetModel = canCombat and state.Assignments[petSlot] or nil
 		local target = targetModel and byModel[targetModel]
 		if target and target.Distance <= Config.HardLeashStuds then
 			local count = counts[target.Model] or 0
@@ -154,13 +160,21 @@ local function stepPlayer(player)
 	end
 
 	for petSlot = 1, #party do
-		if not nextAssignments[petSlot] then
+		local uid = party[petSlot]
+		local canCombat = not vitalsService or vitalsService.CanCombat(player, uid)
+		if canCombat and not nextAssignments[petSlot] then
 			local target = chooseTarget()
 			if not target then
 				break
 			end
 			nextAssignments[petSlot] = target.Model
 			counts[target.Model] = (counts[target.Model] or 0) + 1
+		end
+	end
+
+	if vitalsService then
+		for petSlot, uid in ipairs(party) do
+			vitalsService.SetCombatActive(player, uid, nextAssignments[petSlot] ~= nil)
 		end
 	end
 
@@ -176,13 +190,14 @@ local function initializePlayer(player)
 	player:SetAttribute(Config.AssignmentAttributeName, "")
 end
 
-function PetCombatService.Start(petPartyService)
+function PetCombatService.Start(petPartyService, petVitalsService)
 	if started then
 		return
 	end
 	partyService = petPartyService
-	if not partyService then
-		error("PetCombatService requires PetPartyService.")
+	vitalsService = petVitalsService
+	if not partyService or not vitalsService then
+		error("PetCombatService requires PetPartyService and PetVitalsService.")
 	end
 	started = true
 	addedConnection = Players.PlayerAdded:Connect(initializePlayer)
@@ -223,10 +238,14 @@ function PetCombatService.Stop()
 		removingConnection = nil
 	end
 	for _, player in ipairs(Players:GetPlayers()) do
+		if vitalsService then
+			vitalsService.ReleaseCombat(player)
+		end
 		player:SetAttribute(Config.AssignmentAttributeName, "")
 	end
 	table.clear(stateByPlayer)
 	partyService = nil
+	vitalsService = nil
 	accumulator = 0
 end
 
