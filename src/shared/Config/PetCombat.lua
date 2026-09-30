@@ -38,6 +38,18 @@ return table.freeze({
 	RetargetTurnSpeedDegreesPerSecond = 420,
 	ReturnTurnSpeedDegreesPerSecond = 360,
 
+	-- Pawtopia-inspired Pet damage presentation, adapted to Pawlands' single visual
+	-- actor. These values never alter server damage, KO duration, target ownership,
+	-- or combat positioning authority; they only add readable recoil/down/recovery.
+	PetHitRecoilSeconds = 0.24,
+	PetHitRecoilStuds = 0.68,
+	PetKnockoutBackStuds = 1.0,
+	PetKnockoutPushSeconds = 0.16,
+	PetKnockoutPitchDegrees = -8,
+	PetKnockoutRollDegrees = 68,
+	PetRecoveryBounceSeconds = 0.34,
+	PetRecoveryBounceStuds = 0.55,
+
 	-- Pet attack presentation combines two useful reference ideas:
 	-- PS99: pets first settle into a stable target placement.
 	-- Slime RNG: attacks are short, locked-direction lunges that return to origin.

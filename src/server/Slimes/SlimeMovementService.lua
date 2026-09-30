@@ -205,6 +205,16 @@ local function assignFocus(agent, player, now, pressure)
 		agent.FormationSlot = nil
 		SlimeNavigation.Reset(agent)
 	end
+
+	-- A Player selected here is only the safe fallback while the PetCombatService
+	-- catches up or while no healthy linked Pet exists. Recheck that fallback on
+	-- the short review cadence so a Pet that becomes assigned a frame later can
+	-- reclaim its own duel. Deliberate Player retaliation takeover bypasses this
+	-- helper and keeps the normal TargetStickMinSeconds lock below.
+	if context.Kind == "Player" then
+		agent.NextTargetReviewAt = now + math.max(0.1, tonumber(CombatConfig.TargetReviewIntervalSeconds) or 0.45)
+	end
+
 	SlimeTargeting.AddPressure(pressure, context)
 	return context
 end
@@ -215,9 +225,18 @@ local function currentOrReviewedFocus(agent, player, now, pressure)
 		return assignFocus(agent, player, now, pressure)
 	end
 
-	-- A valid opponent is sticky. Review windows no longer re-roll 80/20 and
-	-- randomly pull a slime off a Pet duel. The only voluntary takeover is a
-	-- deliberate Player retaliation after enough recent direct hits.
+	-- Player fallback is not permanent ownership. PetCombatService publishes its
+	-- combat assignment on a separate heartbeat, so the first focus decision can
+	-- legitimately happen one frame before the linked Pet context exists. Once a
+	-- healthy Pet is assigned to this slime, let it reclaim PrimaryOpponent.
+	if context.Kind == "Player" and now >= (agent.NextTargetReviewAt or 0) then
+		local reviewed = assignFocus(agent, player, now, pressure)
+		return reviewed or context
+	end
+
+	-- A valid Pet opponent is sticky. Review windows do not randomly pull a slime
+	-- off a Pet duel. The only voluntary takeover is deliberate Player retaliation
+	-- after enough recent direct hits. That takeover receives the full stick lock.
 	if context.Kind == "Pet" and now >= (agent.NextTargetReviewAt or 0) then
 		local takeover = SlimeTargeting.TryPlayerTakeover(agent, zone, CombatConfig, now)
 		if takeover then
@@ -426,7 +445,9 @@ local function applyStrikeDamage(strike, currentTarget, amount)
 			petCombatFeedbackService.PublishHit(
 				strike.Player,
 				strike.PetSlot,
-				vitals and vitals.KO == true
+				vitals and vitals.KO == true,
+				vitals and vitals.RecoverAt or 0,
+				strike.Direction
 			)
 		end
 		return applied == true

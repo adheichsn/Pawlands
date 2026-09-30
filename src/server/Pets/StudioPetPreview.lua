@@ -121,7 +121,7 @@ function StudioPetPreview.Start(partyService, inventoryService, vitalsService, f
 		end
 		for slot, equippedUid in ipairs(partyService.GetParty(player)) do
 			if equippedUid == uid then
-				feedbackService.PublishHit(player, slot, vitals.KO == true)
+				feedbackService.PublishHit(player, slot, vitals.KO == true, vitals.RecoverAt or 0, Vector3.zero)
 				return
 			end
 		end

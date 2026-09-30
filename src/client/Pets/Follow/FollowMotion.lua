@@ -68,20 +68,30 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 	local turnSpeed = motionProfile and motionProfile.TurnSpeedDegreesPerSecond
 	visual.Yaw = turnYaw(visual.Yaw, yaw, dt, turnSpeed)
 	local time = clock + visual.Phase
-	local bob = (math.sin(time * Config.IdleFrequency) + 1) * Config.IdleBob
+	local suppressAmbientMotion = motionProfile and motionProfile.SuppressAmbientMotion == true
+	local bob = 0
 	local pitch = 0
-	if flying then
-		bob += math.sin(time * Config.FlyFrequency) * Config.FlyBob
-		pitch = Config.FlyLean * visual.Walk
-	else
-		bob += math.abs(math.sin(time * Config.HopFrequency)) * Config.HopHeight * visual.Walk
-		pitch = math.cos(time * Config.HopFrequency) * Config.WalkLean * visual.Walk
+	if not suppressAmbientMotion then
+		bob = (math.sin(time * Config.IdleFrequency) + 1) * Config.IdleBob
+		if flying then
+			bob += math.sin(time * Config.FlyFrequency) * Config.FlyBob
+			pitch = Config.FlyLean * visual.Walk
+		else
+			bob += math.abs(math.sin(time * Config.HopFrequency)) * Config.HopHeight * visual.Walk
+			pitch = math.cos(time * Config.HopFrequency) * Config.WalkLean * visual.Walk
+		end
 	end
-	-- Calibrate the artwork last so pitch stays on the movement's right axis.
+	local presentationPitch = math.rad(motionProfile and motionProfile.PresentationPitchDegrees or 0)
+	local presentationRoll = math.rad(motionProfile and motionProfile.PresentationRollDegrees or 0)
+	-- Preserve the existing movement rotation order. Authored yaw calibration stays
+	-- last for normal follow/attack pitch; KO tilt is then applied on the visible
+	-- artwork axes, matching Pawtopia's frozen-world-rotation down presentation.
 	presentationOffset = presentationOffset or Vector3.zero
 	local frame = CFrame.new(position + Vector3.new(0, bob, 0) + presentationOffset)
-		* CFrame.Angles(0, visual.Yaw, 0) * CFrame.Angles(pitch, 0, 0)
+		* CFrame.Angles(0, visual.Yaw, 0)
+		* CFrame.Angles(pitch, 0, 0)
 		* CFrame.Angles(0, math.rad(visual.Definition.YawOffset or 0), 0)
+		* CFrame.Angles(presentationPitch, 0, presentationRoll)
 	visual.Model:PivotTo(frame)
 	return true
 end

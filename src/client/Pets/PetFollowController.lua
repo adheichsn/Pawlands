@@ -15,6 +15,8 @@ local CombatObserver = require(script.Parent.Combat.CombatAssignmentObserver)
 local CombatFormation = require(script.Parent.Combat.CombatFormation)
 local CombatAttackRuntime = require(script.Parent.Combat.CombatAttackRuntime)
 local CombatTransitionRuntime = require(script.Parent.Combat.CombatTransitionRuntime)
+local PetVitalsObserver = require(script.Parent.Combat.PetVitalsObserver)
+local PetCombatPresentationRuntime = require(script.Parent.Combat.PetCombatPresentationRuntime)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 
 local PetFollowController = {}
@@ -53,6 +55,7 @@ function PetFollowController.Start()
 			VisualFactory.destroyAll(entries[player].Visuals)
 			entries[player] = nil
 		end
+		PetCombatPresentationRuntime.ClearOwner(player.UserId)
 		probe:Refresh(player)
 	end
 	local stopObserver = Observer.Start(function(player, party, character)
@@ -60,6 +63,7 @@ function PetFollowController.Start()
 		entries[player] = {
 			Party = party,
 			Character = character,
+			PetVitals = PetVitalsObserver.Read(player),
 			Visuals = {},
 			RetryAt = 0,
 			CombatAssignments = {},
@@ -80,6 +84,19 @@ function PetFollowController.Start()
 		if entry then
 			entry.CombatAssignments = {}
 		end
+	end)
+
+	local stopVitalsObserver = PetVitalsObserver.Start(function(player, vitalsBySlot)
+		local entry = entries[player]
+		if entry then
+			entry.PetVitals = vitalsBySlot
+		end
+	end, function(player)
+		local entry = entries[player]
+		if entry then
+			entry.PetVitals = {}
+		end
+		PetCombatPresentationRuntime.ClearOwner(player.UserId)
 	end)
 
 	local renderConnection = RunService.PreRender:Connect(function(frameDt)
@@ -236,6 +253,23 @@ function PetFollowController.Start()
 					targetYaw = CombatFormation.facingYaw(visual.Position, target) or visual.Yaw or yaw
 				end
 
+				local suppressAttack
+				target, targetYaw, attackOffset, motionProfile, suppressAttack = PetCombatPresentationRuntime.Step(
+					player.UserId,
+					slot,
+					visual,
+					(entry.PetVitals or {})[slot],
+					targetPositionsByPet[slot],
+					clock,
+					target,
+					targetYaw or yaw,
+					attackOffset,
+					motionProfile
+				)
+				if suppressAttack then
+					impact = false
+				end
+
 				if impact and player == Players.LocalPlayer then
 					local slimeSlot = validAssignments[slot]
 					if slimeSlot then
@@ -263,8 +297,10 @@ function PetFollowController.Start()
 	end)
 	stopCurrent = function()
 		renderConnection:Disconnect()
+		stopVitalsObserver()
 		stopCombatObserver()
 		stopObserver()
+		PetCombatPresentationRuntime.Clear()
 		folder:Destroy()
 	end
 end

@@ -6,6 +6,7 @@ local Shared = Pawlands:WaitForChild("Shared")
 local CombatConfig = require(Shared.Config.PetCombat)
 local FollowConfig = require(Shared.Config.PetFollow)
 local CombatEffects = require(script.Parent.Parent.Parent.Combat.CombatEffects)
+local PresentationRuntime = require(script.Parent.PetCombatPresentationRuntime)
 
 local PetCombatFeedbackController = {}
 local stopCurrent = nil
@@ -34,7 +35,7 @@ function PetCombatFeedbackController.Start()
 
 	local remotes = Pawlands:WaitForChild(CombatConfig.RemoteFolderName)
 	local feedbackRemote = remotes:WaitForChild(CombatConfig.FeedbackRemoteName)
-	local connection = feedbackRemote.OnClientEvent:Connect(function(ownerUserId, petSlot, knockedOut)
+	local connection = feedbackRemote.OnClientEvent:Connect(function(ownerUserId, petSlot, knockedOut, recoverAt, hitDirection)
 		if type(ownerUserId) ~= "number" or type(petSlot) ~= "number" then
 			return
 		end
@@ -42,6 +43,8 @@ function PetCombatFeedbackController.Start()
 		if petSlot < 1 then
 			return
 		end
+
+		PresentationRuntime.RecordHit(ownerUserId, petSlot, knockedOut, recoverAt, hitDirection)
 
 		local petModel = resolvePetVisual(ownerUserId, petSlot)
 		if not petModel then

@@ -39,7 +39,7 @@ local function ensureFeedbackRemote()
 	return remote
 end
 
-function PetCombatFeedbackService.PublishHit(player, petSlot, knockedOut)
+function PetCombatFeedbackService.PublishHit(player, petSlot, knockedOut, recoverAt, hitDirection)
 	if not started or not feedbackRemote then
 		return
 	end
@@ -56,7 +56,16 @@ function PetCombatFeedbackService.PublishHit(player, petSlot, knockedOut)
 
 	-- The server only publishes presentation metadata after authoritative pet
 	-- damage succeeds. Every client resolves its own local pet visual clone.
-	feedbackRemote:FireAllClients(player.UserId, petSlot, knockedOut == true)
+	if typeof(hitDirection) ~= "Vector3" then
+		hitDirection = Vector3.zero
+	end
+	feedbackRemote:FireAllClients(
+		player.UserId,
+		petSlot,
+		knockedOut == true,
+		tonumber(recoverAt) or 0,
+		hitDirection
+	)
 end
 
 function PetCombatFeedbackService.Start()
