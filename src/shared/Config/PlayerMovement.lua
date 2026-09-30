@@ -4,6 +4,7 @@ return table.freeze({
 	WalkSpeed = 10,
 	RunSpeed = 16,
 	RunToggleKeys = table.freeze({ Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl }),
+	SpeedTransitionSeconds = 0.16,
 
 	MoveDeadzone = 0.05,
 	IdleSpeed = 0.75,

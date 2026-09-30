@@ -1,5 +1,6 @@
 local visibleStates = {
 	Combat = true,
+	Recovering = true,
 	KO = true,
 }
 

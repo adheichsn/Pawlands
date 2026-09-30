@@ -60,9 +60,13 @@ function CombatTransitionRuntime.step(states, slot, visualPosition, targetToken,
 			and Config.RetargetTurnSpeedDegreesPerSecond
 			or Config.CombatTurnSpeedDegreesPerSecond
 		state.Mode = "Combat"
+		local acceleration = movementMode == "Retarget"
+			and Config.RetargetAccelerationStudsPerSecond2
+			or Config.CombatApproachAccelerationStudsPerSecond2
 		return combatGoal, {
 			FollowSpeed = Config.CombatApproachFollowSpeed,
 			MaxHorizontalSpeed = maxSpeed,
+			MaxHorizontalAcceleration = acceleration,
 			TurnSpeedDegreesPerSecond = turnSpeed,
 		}, false, movementMode
 	end
@@ -80,6 +84,7 @@ function CombatTransitionRuntime.step(states, slot, visualPosition, targetToken,
 		return followGoal, {
 			FollowSpeed = Config.ReturnFollowSpeed,
 			MaxHorizontalSpeed = Config.ReturnMaxSpeedStuds,
+			MaxHorizontalAcceleration = Config.ReturnAccelerationStudsPerSecond2,
 			TurnSpeedDegreesPerSecond = Config.ReturnTurnSpeedDegreesPerSecond,
 		}, false, "Return"
 	end

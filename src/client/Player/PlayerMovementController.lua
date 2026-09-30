@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerMovement)
 local RunToggleController = require(script.Parent.Movement.RunToggleController)
@@ -41,8 +42,17 @@ function PlayerMovementController.Start()
 	local player = Players.LocalPlayer
 	local characterCleanup
 	local runToggle
+	local speedTween
+
+	local function cancelSpeedTween()
+		if speedTween then
+			speedTween:Cancel()
+			speedTween = nil
+		end
+	end
 
 	local function cleanupCharacter()
+		cancelSpeedTween()
 		if characterCleanup then
 			characterCleanup()
 			characterCleanup = nil
@@ -82,7 +92,22 @@ function PlayerMovementController.Start()
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 then
-			humanoid.WalkSpeed = running and Config.RunSpeed or Config.WalkSpeed
+			cancelSpeedTween()
+			local targetSpeed = running and Config.RunSpeed or Config.WalkSpeed
+			if Config.SpeedTransitionSeconds > 0 then
+				speedTween = TweenService:Create(
+					humanoid,
+					TweenInfo.new(
+						Config.SpeedTransitionSeconds,
+						Enum.EasingStyle.Quad,
+						Enum.EasingDirection.Out
+					),
+					{ WalkSpeed = targetSpeed }
+				)
+				speedTween:Play()
+			else
+				humanoid.WalkSpeed = targetSpeed
+			end
 		end
 	end)
 	activeRunToggle = runToggle

@@ -36,6 +36,7 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 	if not previous or recall or (previous - goal).Magnitude > Config.RecallDistance then
 		previous = goal
 		visual.Walk = 0
+		visual.MotionSpeed = 0
 		visual.Yaw = nil
 	end
 	local followSpeed = motionProfile and motionProfile.FollowSpeed or Config.FollowSpeed
@@ -48,6 +49,30 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 			local bounded = delta.Unit * maxStep
 			position = Vector3.new(previous.X + bounded.X, position.Y, previous.Z + bounded.Z)
 		end
+	end
+
+	-- Combat/retarget/return profiles can opt into acceleration limiting. The
+	-- existing exponential follow remains the desired path; this only prevents a
+	-- recovery hold from instantly jumping to the transition speed cap.
+	local maxAcceleration = motionProfile and motionProfile.MaxHorizontalAcceleration
+	local desiredDelta = Vector3.new(position.X - previous.X, 0, position.Z - previous.Z)
+	if not recall and maxAcceleration and maxAcceleration > 0 then
+		local desiredSpeed = desiredDelta.Magnitude / math.max(dt, 0.001)
+		local currentSpeed = math.max(0, tonumber(visual.MotionSpeed) or 0)
+		local maxSpeedChange = maxAcceleration * dt
+		local nextSpeed = currentSpeed + math.clamp(
+			desiredSpeed - currentSpeed,
+			-maxSpeedChange,
+			maxSpeedChange
+		)
+		if desiredDelta.Magnitude > 0.001 then
+			local step = math.min(desiredDelta.Magnitude, math.max(0, nextSpeed) * dt)
+			local bounded = desiredDelta.Unit * step
+			position = Vector3.new(previous.X + bounded.X, position.Y, previous.Z + bounded.Z)
+		end
+		visual.MotionSpeed = nextSpeed
+	else
+		visual.MotionSpeed = desiredDelta.Magnitude / math.max(dt, 0.001)
 	end
 	local groundY = probe:Height(position.X, position.Z, root.Position.Y)
 	if not groundY then

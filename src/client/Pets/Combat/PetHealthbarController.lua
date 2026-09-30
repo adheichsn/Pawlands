@@ -112,10 +112,11 @@ local function shouldShow(vitals)
 	if type(vitals) ~= "table" then
 		return false
 	end
-	local maximum = math.max(1, tonumber(vitals.MaxHealth) or 1)
-	local current = math.clamp(tonumber(vitals.Health) or maximum, 0, maximum)
+
+	-- Keep bars tied to combat lifecycle instead of raw missing HP. Damaged Pets
+	-- stay visible only while actively fighting, knocked out, or performing the
+	-- short server-authoritative out-of-combat refill. Full Idle Pets are hidden.
 	return vitals.KO == true
-		or current < maximum
 		or HealthbarConfig.VisibleStates[tostring(vitals.CombatState or "")] == true
 end
 

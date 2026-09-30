@@ -120,15 +120,13 @@ local function releaseModel(model)
 end
 
 local function shouldShow(model, health, maxHealth)
-	if maxHealth <= 0 then
+	if maxHealth <= 0 or health <= 0 or model:GetAttribute("Defeated") == true then
 		return false
 	end
-	if model:GetAttribute("Defeated") == true or health <= 0 then
-		return true
-	end
-	if health < maxHealth then
-		return true
-	end
+
+	-- Combat ownership, not missing HP, owns visibility. A Slime that has returned
+	-- to Idle/Wander keeps its authoritative Health but no longer leaves a stale
+	-- world-space bar floating over a non-combat actor.
 	return HealthbarConfig.VisibleStates[model:GetAttribute("SlimeState")] == true
 end
 

@@ -1,26 +1,24 @@
-# Pawlands — Stage 2B.1C Pet Health & KO Foundation
+# Pawlands — Pet Health / KO / Out-of-Combat Recovery
 
-This stage adds server-authoritative pet vitals without changing pet combat damage, slime targeting, or GUI presentation.
-
-## Runtime state
-
-Each owned pet instance gets session vitals on demand:
+Pet vitals remain server-authoritative. Each owned Pet instance gets session state on demand:
 
 - `Health`
 - `MaxHealth`
-- `CombatState`: `Idle`, `Combat`, or `KO`
+- `CombatState`: `Idle`, `Combat`, `Recovering`, or `KO`
 - `KO`
 - `RecoverAt` using Roblox server time
 
-The current foundation baseline is `100 MaxHealth` for every species and `6 seconds` KO recovery. These are tuning defaults, not final progression balance.
+The current baseline remains `100 MaxHealth` for every species and `6 seconds` KO recovery. These are tuning defaults, not final progression balance.
 
-Equipped-party vitals are replicated atomically through the Player attribute `PawlandsPetVitals`. No pet healthbar is rendered in this stage. The supplied per-species icon IDs are cataloged in `PetCatalog` for the later Studio-authored healthbar binding stage.
+## Out-of-combat recovery
 
-## KO behavior
+When a healthy damaged Pet loses its combat assignment, it enters `Recovering` instead of keeping stale missing HP forever. After a short `0.35s` handoff delay, the server refills that Pet from its current Health to MaxHealth over `3.0s`.
 
-At zero Health the pet enters `KO`, becomes ineligible for pet combat assignment, and receives a recovery deadline. After the recovery timer expires it returns at full Health in `Idle`, making it eligible for combat assignment again.
+Recovery is cancelled immediately when the Pet receives a new combat assignment. Its current recovered Health is preserved; re-entering combat never grants a free full heal.
 
-Stage 2B.1C does not make slimes attack pets yet. Studio-only commands are included so KO/recovery can be tested before Stage 2B.1D connects slime attacks to this service.
+The Pet healthbar stays visible during `Combat`, `Recovering`, and `KO`. Once recovery reaches full Health the Pet returns to `Idle`, and the healthbar hides again.
+
+KO recovery is intentionally separate: a KO Pet remains ineligible for combat for the existing six-second timer, then returns at full Health.
 
 ## Studio QA commands
 
@@ -29,4 +27,6 @@ Stage 2B.1C does not make slimes attack pets yet. Studio-only commands are inclu
 - `!petko p1`
 - `!petheal p1`
 
-Expected KO test: `!petko p1` should remove that equipped pet from combat assignment on the next allocator update; after about 6 seconds it should recover to full Health and become eligible again.
+Expected normal recovery test: damage a healthy Pet, finish/leave combat, observe `Recovering`, smooth HP refill, then `Idle` at full Health with the bar hidden.
+
+Expected KO test: `!petko p1` removes that equipped Pet from combat assignment; after about six seconds it returns at full Health and becomes eligible again.

@@ -10,6 +10,7 @@ local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local Codec = require(Shared.Pets.PetCombatCodec)
 local CombatFormation = require(Shared.Pets.PetCombatFormation)
 local SlimeHealth = require(script.Parent.Parent.Slimes.SlimeHealth)
+local PetStrikeAuthority = require(script.Parent.PetStrikeAuthority)
 
 local PetCombatService = {}
 local started = false
@@ -197,33 +198,6 @@ local function buildCombatTargets(player, party, assignments, state, root)
 	return serializable
 end
 
-local function syncAttackGuards(state, clock)
-	local activeSlots = {}
-	for petSlot, entry in pairs(state.CombatTargets or {}) do
-		activeSlots[petSlot] = true
-		local guard = state.AttackGuards[petSlot]
-		if not guard
-			or guard.Uid ~= entry.Uid
-			or guard.SlimeModel ~= entry.SlimeModel
-			or guard.SlimeSlot ~= entry.SlimeSlot
-		then
-			state.AttackGuards[petSlot] = {
-				Uid = entry.Uid,
-				SlimeModel = entry.SlimeModel,
-				SlimeSlot = entry.SlimeSlot,
-				NextImpactAt = clock
-					+ Config.AttackInitialDelaySeconds
-					+ math.max(0, petSlot - 1) * Config.AttackStaggerSeconds,
-			}
-		end
-	end
-	for petSlot in pairs(state.AttackGuards) do
-		if not activeSlots[petSlot] then
-			state.AttackGuards[petSlot] = nil
-		end
-	end
-end
-
 local function horizontalDirection(fromPosition, toPosition)
 	local direction = Vector3.new(
 		toPosition.X - fromPosition.X,
@@ -278,10 +252,11 @@ local function processImpact(player, petSlot, slimeSlot)
 	end
 
 	local clock = os.clock()
-	if clock + Config.ServerImpactCadenceToleranceSeconds < guard.NextImpactAt then
+	local validImpact = PetStrikeAuthority.ValidateImpact(guard, entry, slimePosition, clock)
+	if not validImpact then
 		return
 	end
-	guard.NextImpactAt = clock + Config.AttackCadenceSeconds
+	PetStrikeAuthority.CommitImpact(guard, slimePosition, clock)
 
 	local damage = math.max(1, math.floor((tonumber(Config.DefaultDamage) or 1) + 0.5))
 	local hitDirection = horizontalDirection(entry.Position, slimePosition)
@@ -304,7 +279,7 @@ local function processImpact(player, petSlot, slimeSlot)
 	end
 end
 
-local function stepPlayer(player)
+local function stepPlayer(player, dt)
 	local root = getRoot(player)
 	local party = partyService.GetParty(player)
 	if not root or #party == 0 then
@@ -412,7 +387,14 @@ local function stepPlayer(player)
 
 	state.Assignments = nextAssignments
 	local serializable = buildCombatTargets(player, party, nextAssignments, state, root)
-	syncAttackGuards(state, os.clock())
+	PetStrikeAuthority.Sync(
+		state.AttackGuards,
+		state.CombatTargets,
+		root,
+		#party,
+		os.clock(),
+		dt or (1 / math.max(1, Config.UpdateRate))
+	)
 	state.Published = publish(player, serializable, state.Published)
 end
 
@@ -465,7 +447,7 @@ function PetCombatService.Start(petPartyService, petVitalsService)
 		end
 		accumulator %= interval
 		for _, player in ipairs(Players:GetPlayers()) do
-			stepPlayer(player)
+			stepPlayer(player, interval)
 		end
 	end)
 end

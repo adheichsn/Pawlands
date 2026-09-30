@@ -54,12 +54,13 @@ function VisualFactory.create(id, ownerId, slot)
 		Position = nil,
 		Yaw = nil,
 		Walk = 0,
+		MotionSpeed = 0,
 	}, nil
 end
 
 function VisualFactory.hide(visual)
 	visual.Model.Parent = nil
-	visual.Position, visual.Yaw, visual.Walk = nil, nil, 0
+	visual.Position, visual.Yaw, visual.Walk, visual.MotionSpeed = nil, nil, 0, 0
 end
 
 function VisualFactory.destroyAll(visuals)
