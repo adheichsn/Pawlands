@@ -43,6 +43,7 @@ function VisualFactory.create(id, ownerId, slot)
 	local localCenter = pivot:PointToObjectSpace(bounds.Position)
 	model.Name = tostring(ownerId) .. "_" .. tostring(slot) .. "_" .. id
 	model:SetAttribute("OwnerUserId", ownerId)
+	model:SetAttribute("PetSlot", slot)
 	model:SetAttribute("PetId", id)
 	return {
 		Model = model,

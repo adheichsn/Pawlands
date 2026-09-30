@@ -34,6 +34,7 @@ local formationStateByPlayer = {}
 local pendingRespawns = {}
 local petCombatService = nil
 local petVitalsService = nil
+local petCombatFeedbackService = nil
 
 local function getOrCreateRuntimeFolder()
 	local existing = Workspace:FindFirstChild(Config.RuntimeFolderName)
@@ -420,7 +421,14 @@ local function applyStrikeDamage(strike, currentTarget, amount)
 		if not petVitalsService or not strike.Player or not strike.PetUid then
 			return false
 		end
-		local applied = petVitalsService.ApplyDamage(strike.Player, strike.PetUid, amount)
+		local applied, vitals = petVitalsService.ApplyDamage(strike.Player, strike.PetUid, amount)
+		if applied and petCombatFeedbackService then
+			petCombatFeedbackService.PublishHit(
+				strike.Player,
+				strike.PetSlot,
+				vitals and vitals.KO == true
+			)
+		end
 		return applied == true
 	end
 
@@ -580,15 +588,16 @@ local function spawnAgents()
 	return authoredLoopCount
 end
 
-function SlimeMovementService.Start(petCombat, petVitals)
+function SlimeMovementService.Start(petCombat, petVitals, petCombatFeedback)
 	if running or not Config.Enabled then
 		return
 	end
-	if not petCombat or not petVitals then
-		error("SlimeMovementService requires PetCombatService and PetVitalsService.")
+	if not petCombat or not petVitals or not petCombatFeedback then
+		error("SlimeMovementService requires PetCombatService, PetVitalsService, and PetCombatFeedbackService.")
 	end
 	petCombatService = petCombat
 	petVitalsService = petVitals
+	petCombatFeedbackService = petCombatFeedback
 	running = true
 	runtimeFolder = getOrCreateRuntimeFolder()
 	local resolved, reason = SlimeZone.new(Config, runtimeFolder)
@@ -596,6 +605,7 @@ function SlimeMovementService.Start(petCombat, petVitals)
 		running = false
 		petCombatService = nil
 		petVitalsService = nil
+		petCombatFeedbackService = nil
 		warn("[Pawlands Slimes] " .. tostring(reason))
 		if runtimeFolder then
 			runtimeFolder:Destroy()
@@ -648,7 +658,7 @@ function SlimeMovementService.Stop()
 		runtimeFolder:Destroy()
 	end
 	runtimeFolder, zone = nil, nil
-	petCombatService, petVitalsService = nil, nil
+	petCombatService, petVitalsService, petCombatFeedbackService = nil, nil, nil
 	accumulator = 0
 end
 

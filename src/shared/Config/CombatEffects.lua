@@ -21,8 +21,25 @@ return table.freeze({
 		TemplateName = "KnockedOut",
 	}),
 
+	PetCombat = table.freeze({
+		FolderName = "PetCombat",
+		PetToSlime = table.freeze({
+			FolderName = "PetToSlime",
+			HitTemplateName = "HitSplat",
+		}),
+		SlimeToPet = table.freeze({
+			FolderName = "SlimeToPet",
+			HitTemplateName = "HitSplat",
+		}),
+		PetKO = table.freeze({
+			FolderName = "PetKO",
+			TemplateName = "KnockedOut",
+		}),
+	}),
+
 	RootPartName = "RootPart",
 	PlayerRootPartName = "HumanoidRootPart",
+	PetRootPartName = "Body",
 	DefaultEmitCount = 1,
 	EffectCleanupSeconds = 4.0,
 	SoundCleanupSeconds = 4.0,

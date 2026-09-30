@@ -109,7 +109,9 @@ local function beginHit(record)
 
 	restoreHitPose(record)
 	resolveBodyMotor(record)
-	if record.Model:GetAttribute("LastHitSourceType") ~= "Pet" then
+	if record.Model:GetAttribute("LastHitSourceType") == "Pet" then
+		CombatEffects.PlayPetHitSlime(record.Model)
+	else
 		CombatEffects.PlayPlayerHitSlime(record.Model, record.Model:GetAttribute("HitSerial"))
 	end
 	record.HitTier = tier

@@ -18,7 +18,7 @@ local function catalogNames()
 	return names
 end
 
-function StudioPetPreview.Start(partyService, inventoryService, vitalsService)
+function StudioPetPreview.Start(partyService, inventoryService, vitalsService, feedbackService)
 	if started or not RunService:IsStudio() then
 		return
 	end
@@ -115,6 +115,18 @@ function StudioPetPreview.Start(partyService, inventoryService, vitalsService)
 		return partyService.SetParty(player, uids)
 	end
 
+	local function publishDamageFeedback(player, uid, vitals)
+		if not feedbackService or not vitals then
+			return
+		end
+		for slot, equippedUid in ipairs(partyService.GetParty(player)) do
+			if equippedUid == uid then
+				feedbackService.PublishHit(player, slot, vitals.KO == true)
+				return
+			end
+		end
+	end
+
 	local function report(player, ok, reason)
 		if ok then
 			printParty(player)
@@ -201,8 +213,10 @@ function StudioPetPreview.Start(partyService, inventoryService, vitalsService)
 					elseif not vitalsService then
 						warn("[Pawlands Pets] Pet vitals service is unavailable.")
 					else
-						local ok, vitals, reason = vitalsService.ApplyDamage(player, string.lower(uid), amount)
+						uid = string.lower(uid)
+						local ok, vitals, reason = vitalsService.ApplyDamage(player, uid, amount)
 						if ok then
+							publishDamageFeedback(player, uid, vitals)
 							print("[Pawlands Pets] Hurt " .. formatVitals(vitals))
 						else
 							warn("[Pawlands Pets] " .. tostring(reason))
@@ -214,8 +228,10 @@ function StudioPetPreview.Start(partyService, inventoryService, vitalsService)
 					elseif not vitalsService then
 						warn("[Pawlands Pets] Pet vitals service is unavailable.")
 					else
-						local ok, vitals, reason = vitalsService.KnockOut(player, string.lower(tail))
+						local uid = string.lower(tail)
+						local ok, vitals, reason = vitalsService.KnockOut(player, uid)
 						if ok then
+							publishDamageFeedback(player, uid, vitals)
 							print("[Pawlands Pets] KO " .. formatVitals(vitals))
 						else
 							warn("[Pawlands Pets] " .. tostring(reason))

@@ -29,6 +29,20 @@ local function combatAssets()
 end
 
 
+
+
+local function petCombatAssets()
+	local combat = combatAssets()
+	local petCombat = combat and combat:FindFirstChild(Config.PetCombat.FolderName)
+	if not petCombat then
+		warnOnce(
+			"PetCombatAssets",
+			"[Pawlands CombatEffects] Missing Studio-authored Combat/PetCombat assets."
+		)
+	end
+	return petCombat
+end
+
 local function resolveTargetPart(target, preferredName)
 	if not target then
 		return nil
@@ -59,13 +73,17 @@ local function playSoundTemplate(soundTemplate, parent)
 	Debris:AddItem(sound, Config.SoundCleanupSeconds)
 end
 
-local function emitDescendants(container)
+local function emitDescendants(container, playSounds)
+	if playSounds == nil then
+		playSounds = true
+	end
+
 	for _, descendant in ipairs(container:GetDescendants()) do
 		if descendant:IsA("ParticleEmitter") then
 			descendant.Enabled = false
 			local count = tonumber(descendant:GetAttribute("EmitCount")) or Config.DefaultEmitCount
 			descendant:Emit(math.max(0, math.floor(count + 0.5)))
-		elseif descendant:IsA("Sound") then
+		elseif playSounds and descendant:IsA("Sound") then
 			descendant:Play()
 		end
 	end
@@ -74,12 +92,12 @@ local function emitDescendants(container)
 		container.Enabled = false
 		local count = tonumber(container:GetAttribute("EmitCount")) or Config.DefaultEmitCount
 		container:Emit(math.max(0, math.floor(count + 0.5)))
-	elseif container:IsA("Sound") then
+	elseif playSounds and container:IsA("Sound") then
 		container:Play()
 	end
 end
 
-local function spawnTemplateAtPart(template, targetPart)
+local function spawnTemplateAtPart(template, targetPart, playSounds)
 	if not template or not targetPart then
 		return nil
 	end
@@ -91,7 +109,7 @@ local function spawnTemplateAtPart(template, targetPart)
 	if authoredAttachment then
 		local clone = authoredAttachment:Clone()
 		clone.Parent = targetPart
-		emitDescendants(clone)
+		emitDescendants(clone, playSounds)
 		Debris:AddItem(clone, Config.EffectCleanupSeconds)
 		return clone
 	end
@@ -119,7 +137,7 @@ local function spawnTemplateAtPart(template, targetPart)
 		clone.Parent = targetPart
 	end
 
-	emitDescendants(clone)
+	emitDescendants(clone, playSounds)
 	Debris:AddItem(clone, Config.EffectCleanupSeconds)
 	return clone
 end
@@ -170,6 +188,51 @@ function CombatEffects.PlayPlayerHitSlime(slimeModel, hitSerial)
 			"[Pawlands CombatEffects] Missing Studio-authored PlayerToSlime/HitSFX/Hit1..4 sounds."
 		)
 	end
+end
+
+function CombatEffects.PlayPetHitSlime(slimeModel)
+	local petCombat = petCombatAssets()
+	local folder = petCombat and petCombat:FindFirstChild(Config.PetCombat.PetToSlime.FolderName)
+	local template = folder and folder:FindFirstChild(Config.PetCombat.PetToSlime.HitTemplateName)
+	local root = resolveTargetPart(slimeModel, Config.RootPartName)
+	if not template then
+		warnOnce(
+			"PetHitSlime",
+			"[Pawlands CombatEffects] Missing Studio-authored PetCombat/PetToSlime/HitSplat template."
+		)
+		return
+	end
+	spawnTemplateAtPart(template, root)
+end
+
+function CombatEffects.PlaySlimeHitPet(petModel, playSound)
+	local petCombat = petCombatAssets()
+	local folder = petCombat and petCombat:FindFirstChild(Config.PetCombat.SlimeToPet.FolderName)
+	local template = folder and folder:FindFirstChild(Config.PetCombat.SlimeToPet.HitTemplateName)
+	local root = resolveTargetPart(petModel, Config.PetRootPartName)
+	if not template then
+		warnOnce(
+			"SlimeHitPet",
+			"[Pawlands CombatEffects] Missing Studio-authored PetCombat/SlimeToPet/HitSplat template."
+		)
+		return
+	end
+	spawnTemplateAtPart(template, root, playSound)
+end
+
+function CombatEffects.PlayPetKO(petModel)
+	local petCombat = petCombatAssets()
+	local folder = petCombat and petCombat:FindFirstChild(Config.PetCombat.PetKO.FolderName)
+	local template = folder and folder:FindFirstChild(Config.PetCombat.PetKO.TemplateName)
+	local root = resolveTargetPart(petModel, Config.PetRootPartName)
+	if not template then
+		warnOnce(
+			"PetKO",
+			"[Pawlands CombatEffects] Missing Studio-authored PetCombat/PetKO/KnockedOut template."
+		)
+		return
+	end
+	spawnTemplateAtPart(template, root)
 end
 
 function CombatEffects.PlaySlimeHitPlayer(character)

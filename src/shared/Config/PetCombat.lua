@@ -59,4 +59,5 @@ return table.freeze({
 	ServerImpactLeashPaddingStuds = 2.0,
 	RemoteFolderName = "Remotes",
 	AttackImpactRemoteName = "PetAttackImpact",
+	FeedbackRemoteName = "PetCombatFeedback",
 })
