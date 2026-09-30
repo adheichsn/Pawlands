@@ -6,6 +6,7 @@ local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerCombat)
 local CombatTargeting = require(script.Parent.CombatTargeting)
 local CombatContactRuntime = require(script.Parent.CombatContactRuntime)
+local CombatEffects = require(script.Parent.CombatEffects)
 local PlayerAttackAnimator = require(script.Parent.PlayerAttackAnimator)
 local ComboFlow = require(script.Parent.ComboFlow)
 local PlayerMovementController = require(script.Parent.Parent.Player.PlayerMovementController)
@@ -74,6 +75,7 @@ function PlayerCombatController.Start()
 					animatorRuntime:PlayRunning()
 				else
 					animatorRuntime:PlayCombo(comboIndex)
+					CombatEffects.PlaySwing(character, comboIndex)
 				end
 
 				-- Preferred target only improves local facing/contact presentation. The

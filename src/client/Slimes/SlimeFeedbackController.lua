@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local FeedbackConfig = require(Shared.Config.SlimeFeedback)
 local MovementConfig = require(Shared.Config.SlimeMovement)
+local CombatEffects = require(script.Parent.Parent.Combat.CombatEffects)
 
 local SlimeFeedbackController = {}
 local stopCurrent
@@ -108,6 +109,7 @@ local function beginHit(record)
 
 	restoreHitPose(record)
 	resolveBodyMotor(record)
+	CombatEffects.PlayPlayerHitSlime(record.Model, record.Model:GetAttribute("HitSerial"))
 	record.HitTier = tier
 	record.HitDirection = direction
 	record.HitStartedAt = os.clock()
@@ -119,6 +121,7 @@ local function beginDefeat(record)
 	end
 
 	restoreHitPose(record)
+	CombatEffects.PlaySlimeDefeat(record.Model)
 	local defeatedAt = tonumber(record.Model:GetAttribute("DefeatedAt"))
 	record.DefeatStartedAt = defeatedAt and defeatedAt > 0
 		and defeatedAt

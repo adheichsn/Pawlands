@@ -114,7 +114,14 @@ function SlimeAttackRuntime.Update(agent, now, zone, config)
 		if dodgeDistance <= config.AttackDodgeToleranceStuds
 			and currentDistance <= config.AttackMaxImpactDistanceStuds
 			and clearRoute then
+			local healthBefore = humanoid.Health
 			humanoid:TakeDamage(config.AttackDamage)
+			if character.Parent and humanoid.Health < healthBefore - 0.01 then
+				character:SetAttribute(
+					"SlimeHitSerial",
+					(character:GetAttribute("SlimeHitSerial") or 0) + 1
+				)
+			end
 			if RunService:IsStudio() then
 				print(string.format(
 					"[Pawlands Slimes] %s hit %s for %d damage.",

@@ -130,3 +130,31 @@ Add modular pet follow foundation
 - Add Studio-only preview parties and test commands.
 - Preserve Studio-owned assets with scoped Rojo mounts.
 ```
+# Stage 2A.2.3 — Combat SFX & VFX Feedback
+
+This patch adds presentation bindings around the existing server-authoritative combat loop.
+
+## Runtime mapping
+
+### Player → Slime (Battlegrounds-authored assets)
+- M1 swing: `PlayerToSlime/SwingSFX/Swing1..4`
+- Confirmed hit SFX: `PlayerToSlime/HitSFX/Hit1..4`
+- Confirmed hit VFX: `PlayerToSlime/HitEffect`
+
+### Slime → Player (Slime RNG-authored asset)
+- Confirmed hit VFX + SFX: `SlimeToPlayer/Hit`
+
+### Slime defeat (Slime RNG-authored asset)
+- KO VFX + SFX: `KnockedOut/KnockedOut`
+- Existing Pawlands squash/pop/shrink presentation remains active.
+
+## Asset ownership rule
+The effects are designed in Studio. Code only clones authored templates, emits their existing ParticleEmitters, plays their existing Sounds, then cleans up the clone. No VFX/SFX primitives are constructed from scratch.
+
+## QA
+1. M1 whiff: swing sound plays; no hit VFX/SFX.
+2. M1 hit: swing sound + confirmed hit sound/VFX + existing recoil + HP bar update.
+3. Slime strike dodged: no player hit VFX/SFX.
+4. Slime strike connects: Slime RNG hit VFX/SFX + existing player hit reaction.
+5. Slime reaches 0 HP: `KnockedOut` VFX/SFX + existing squash/pop/shrink + despawn + normal respawn.
+6. Confirm Running Attack still works; no special DashHit effect is added in this stage.

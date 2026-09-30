@@ -4,6 +4,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local CombatConfig = require(Shared.Config.PlayerCombat)
 local CombatAnimations = require(Shared.Config.PlayerCombatAnimations)
+local CombatEffects = require(script.Parent.CombatEffects)
 
 local PlayerHitReactionController = {}
 local stopCurrent
@@ -116,9 +117,21 @@ function PlayerHitReactionController.Start()
 			end
 		end)
 
+		local lastSlimeHitSerial = tonumber(character:GetAttribute("SlimeHitSerial")) or 0
+		local slimeHitConnection = character:GetAttributeChangedSignal("SlimeHitSerial"):Connect(function()
+			local serial = tonumber(character:GetAttribute("SlimeHitSerial")) or 0
+			if serial <= lastSlimeHitSerial then
+				lastSlimeHitSerial = serial
+				return
+			end
+			lastSlimeHitSerial = serial
+			CombatEffects.PlaySlimeHitPlayer(character)
+		end)
+
 		characterCleanup = function()
 			generation += 1
 			healthConnection:Disconnect()
+			slimeHitConnection:Disconnect()
 			if currentTrack and currentTrack.IsPlaying then
 				currentTrack:Stop(0)
 			end
