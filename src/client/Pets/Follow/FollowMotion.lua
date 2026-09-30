@@ -6,7 +6,7 @@ local function alpha(speed, dt)
 	return 1 - math.exp(-speed * dt)
 end
 
-function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, recall)
+function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, recall, presentationOffset)
 	local targetY = probe:Height(target.X, target.Z, root.Position.Y)
 	if not targetY then
 		-- Recover near the player at an edge or across an unloaded gap.
@@ -59,7 +59,8 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 		pitch = math.cos(time * Config.HopFrequency) * Config.WalkLean * visual.Walk
 	end
 	-- Calibrate the artwork last so pitch stays on the movement's right axis.
-	local frame = CFrame.new(position + Vector3.new(0, bob, 0))
+	presentationOffset = presentationOffset or Vector3.zero
+	local frame = CFrame.new(position + Vector3.new(0, bob, 0) + presentationOffset)
 		* CFrame.Angles(0, visual.Yaw, 0) * CFrame.Angles(pitch, 0, 0)
 		* CFrame.Angles(0, math.rad(visual.Definition.YawOffset or 0), 0)
 	visual.Model:PivotTo(frame)

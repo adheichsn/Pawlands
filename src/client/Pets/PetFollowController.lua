@@ -11,6 +11,7 @@ local Motion = require(script.Parent.Follow.FollowMotion)
 local CombatConfig = require(Shared.Config.PetCombat)
 local CombatObserver = require(script.Parent.Combat.CombatAssignmentObserver)
 local CombatFormation = require(script.Parent.Combat.CombatFormation)
+local CombatAttackRuntime = require(script.Parent.Combat.CombatAttackRuntime)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 
 local PetFollowController = {}
@@ -51,7 +52,7 @@ function PetFollowController.Start()
 	end
 	local stopObserver = Observer.Start(function(player, party, character)
 		remove(player)
-		entries[player] = { Party = party, Character = character, Visuals = {}, RetryAt = 0, CombatAssignments = {}, CombatAnchors = {} }
+		entries[player] = { Party = party, Character = character, Visuals = {}, RetryAt = 0, CombatAssignments = {}, CombatAnchors = {}, CombatAttackStates = {} }
 		probe:Refresh()
 	end, remove)
 
@@ -119,6 +120,7 @@ function PetFollowController.Start()
 
 			local validAssignments = {}
 			local targetPositions = {}
+			local targetModels = {}
 			for petSlot, assignedSlimeSlot in pairs(entry.CombatAssignments or {}) do
 				local slime = slimesBySlot[assignedSlimeSlot]
 				if slime and slime:GetAttribute("Defeated") ~= true then
@@ -126,6 +128,7 @@ function PetFollowController.Start()
 					if (slimePosition - root.Position).Magnitude <= CombatConfig.HardLeashStuds + 2 then
 						validAssignments[petSlot] = assignedSlimeSlot
 						targetPositions[assignedSlimeSlot] = slimePosition
+						targetModels[petSlot] = slime
 					end
 				end
 			end
@@ -154,18 +157,32 @@ function PetFollowController.Start()
 				end
 			end
 			combatGoals = CombatFormation.resolveSpacing(combatGoals, targetPositionsByPet)
+			CombatAttackRuntime.trim(entry.CombatAttackStates, #entry.Party)
 
 			for slot, visual in pairs(entry.Visuals) do
 				local target = combatGoals[slot]
 				local targetYaw
+				local attackOffset = Vector3.zero
 				if target then
 					targetYaw = CombatFormation.facingYaw(target, targetPositionsByPet[slot])
+					attackOffset = CombatAttackRuntime.step(
+						entry.CombatAttackStates,
+						slot,
+						visual,
+						targetModels[slot],
+						targetPositionsByPet[slot],
+						target,
+						clock
+					)
 				else
 					local x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
 					target = frame:PointToWorldSpace(Vector3.new(x, 0, z))
 					targetYaw = yaw
+					attackOffset = CombatAttackRuntime.step(
+						entry.CombatAttackStates, slot, visual, nil, nil, nil, clock
+					)
 				end
-				if Motion.step(visual, target, root, targetYaw or yaw, dt, clock, probe, recall) then
+				if Motion.step(visual, target, root, targetYaw or yaw, dt, clock, probe, recall, attackOffset) then
 					visual.Model.Parent = folder
 				else
 					VisualFactory.hide(visual)
