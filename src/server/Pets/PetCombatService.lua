@@ -6,6 +6,7 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):Wai
 local Config = require(Shared.Config.PetCombat)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local Codec = require(Shared.Pets.PetCombatCodec)
+local CombatFormation = require(Shared.Pets.PetCombatFormation)
 
 local PetCombatService = {}
 local started = false
@@ -49,6 +50,9 @@ local function isActiveTarget(model, player)
 	if (tonumber(model:GetAttribute("Health")) or 0) <= 0 then
 		return false
 	end
+	-- TargetUserId remains the owning player even when the slime's current focus
+	-- is one of that player's pets. This keeps pet allocation stable and lets the
+	-- slime/pet targeting layers share one encounter owner without circular state.
 	if tonumber(model:GetAttribute("TargetUserId")) ~= player.UserId then
 		return false
 	end
@@ -103,6 +107,67 @@ local function publish(player, assignments, previous)
 	return encoded
 end
 
+local function buildCombatTargets(player, party, assignments, state, root)
+	local serializable = {}
+	local targetPositions = {}
+	for petSlot, model in pairs(assignments) do
+		local slimeSlot = tonumber(model:GetAttribute("SlimeSlot"))
+		if slimeSlot then
+			slimeSlot = math.floor(slimeSlot)
+			serializable[petSlot] = slimeSlot
+			targetPositions[slimeSlot] = model:GetPivot().Position
+		end
+	end
+
+	local combatCenter = CombatFormation.combatCenter(serializable, targetPositions)
+	local activeAnchors = {}
+	local rawGoals = {}
+	local targetPositionsByPet = {}
+
+	for petSlot, slimeSlot in pairs(serializable) do
+		local model = assignments[petSlot]
+		local slimePosition = targetPositions[slimeSlot]
+		if model and slimePosition then
+			local anchor = state.CombatAnchors[slimeSlot]
+			if not anchor then
+				anchor = {
+					Direction = CombatFormation.outerDirection(slimePosition, root.Position, combatCenter),
+				}
+				state.CombatAnchors[slimeSlot] = anchor
+			end
+			activeAnchors[slimeSlot] = true
+			local attackers = CombatFormation.attackersForTarget(serializable, slimeSlot)
+			rawGoals[petSlot] = CombatFormation.goal(petSlot, attackers, slimePosition, anchor.Direction)
+			targetPositionsByPet[petSlot] = slimePosition
+		end
+	end
+
+	for slimeSlot in pairs(state.CombatAnchors) do
+		if not activeAnchors[slimeSlot] then
+			state.CombatAnchors[slimeSlot] = nil
+		end
+	end
+
+	local goals = CombatFormation.resolveSpacing(rawGoals, targetPositionsByPet)
+	local combatTargets = {}
+	for petSlot, goal in pairs(goals) do
+		local uid = party[petSlot]
+		local model = assignments[petSlot]
+		local slimeSlot = serializable[petSlot]
+		if uid and model and slimeSlot then
+			combatTargets[petSlot] = {
+				Slot = petSlot,
+				Uid = uid,
+				SlimeSlot = slimeSlot,
+				SlimeModel = model,
+				Position = goal,
+			}
+		end
+	end
+	state.CombatTargets = combatTargets
+	return serializable
+end
+
 local function stepPlayer(player)
 	local root = getRoot(player)
 	local party = partyService.GetParty(player)
@@ -113,7 +178,12 @@ local function stepPlayer(player)
 
 	local state = stateByPlayer[player]
 	if not state then
-		state = { Assignments = {}, Published = nil }
+		state = {
+			Assignments = {},
+			Published = nil,
+			CombatAnchors = {},
+			CombatTargets = {},
+		}
 		stateByPlayer[player] = state
 	end
 
@@ -179,15 +249,30 @@ local function stepPlayer(player)
 	end
 
 	state.Assignments = nextAssignments
-	local serializable = {}
-	for petSlot, model in pairs(nextAssignments) do
-		serializable[petSlot] = tonumber(model:GetAttribute("SlimeSlot"))
-	end
+	local serializable = buildCombatTargets(player, party, nextAssignments, state, root)
 	state.Published = publish(player, serializable, state.Published)
 end
 
 local function initializePlayer(player)
 	player:SetAttribute(Config.AssignmentAttributeName, "")
+end
+
+function PetCombatService.GetCombatTargets(player)
+	local state = stateByPlayer[player]
+	if not state then
+		return {}
+	end
+	local result = {}
+	for slot, entry in pairs(state.CombatTargets or {}) do
+		result[slot] = {
+			Slot = entry.Slot,
+			Uid = entry.Uid,
+			SlimeSlot = entry.SlimeSlot,
+			SlimeModel = entry.SlimeModel,
+			Position = entry.Position,
+		}
+	end
+	return result
 end
 
 function PetCombatService.Start(petPartyService, petVitalsService)

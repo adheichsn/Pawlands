@@ -15,6 +15,7 @@ local SlimeAttackScheduler = require(script.Parent.SlimeAttackScheduler)
 local SlimeFactory = require(script.Parent.SlimeFactory)
 local SlimeFormation = require(script.Parent.SlimeFormation)
 local SlimeNavigation = require(script.Parent.SlimeNavigation)
+local SlimeTargeting = require(script.Parent.SlimeTargeting)
 local SlimeZone = require(script.Parent.SlimeZone)
 local SlimeHealth = require(script.Parent.SlimeHealth)
 local SlimeLifecycle = require(script.Parent.SlimeLifecycle)
@@ -31,6 +32,8 @@ local filterRefreshAt = 0
 local accumulator = 0
 local formationStateByPlayer = {}
 local pendingRespawns = {}
+local petCombatService = nil
+local petVitalsService = nil
 
 local function getOrCreateRuntimeFolder()
 	local existing = Workspace:FindFirstChild(Config.RuntimeFolderName)
@@ -68,7 +71,7 @@ local function isTargetValid(agent, player, disengage)
 	return agent:DistanceTo(root.Position) <= maximum, root
 end
 
-local function chooseTarget(agent)
+local function chooseOwnerPlayer(agent)
 	if agent.TargetPlayer then
 		local valid = isTargetValid(agent, agent.TargetPlayer, true)
 		if valid then
@@ -105,6 +108,7 @@ end
 local function disengage(agent, now)
 	withdrawAttackTurn(agent)
 	SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
+	SlimeTargeting.Clear(agent)
 	if agent:DistanceTo(agent.HomePosition) > Config.ReturnHomeDistance then
 		agent:EnterReturn()
 	else
@@ -118,6 +122,7 @@ local function retireDefeatedAgents(now)
 		if not SlimeHealth.IsAlive(agent.Model) then
 			withdrawAttackTurn(agent)
 			SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
+			SlimeTargeting.Clear(agent)
 			agent:SetState("Defeated", nil)
 			agent:SetCombatReady(false)
 			agent.Velocity = Vector3.zero
@@ -166,58 +171,138 @@ local function processPendingRespawns(now)
 	end
 end
 
+local function buildPetPressure()
+	local pressure = {}
+	for _, agent in ipairs(agents) do
+		if agent.TargetKind == "Pet" and agent.TargetKey then
+			local context = SlimeTargeting.ResolveCurrent(agent, petCombatService, petVitalsService, zone)
+			if context then
+				SlimeTargeting.AddPressure(pressure, context)
+			end
+		end
+	end
+	return pressure
+end
+
+local function assignFocus(agent, player, now, pressure)
+	local context = SlimeTargeting.Select(
+		agent,
+		player,
+		petCombatService,
+		petVitalsService,
+		zone,
+		CombatConfig,
+		pressure,
+		randomObject
+	)
+	if not context then
+		return nil
+	end
+	local changed = SlimeTargeting.Assign(agent, context, now, CombatConfig, randomObject)
+	if changed then
+		withdrawAttackTurn(agent)
+		agent.FormationSlot = nil
+		SlimeNavigation.Reset(agent)
+	end
+	SlimeTargeting.AddPressure(pressure, context)
+	return context
+end
+
+local function currentOrReviewedFocus(agent, player, now, pressure)
+	local context = SlimeTargeting.ResolveCurrent(agent, petCombatService, petVitalsService, zone)
+	if not context or now >= (agent.NextTargetReviewAt or 0) then
+		if context and context.Kind == "Pet" then
+			pressure[context.Key] = math.max(0, (pressure[context.Key] or 0) - 1)
+		end
+		return assignFocus(agent, player, now, pressure)
+	end
+	return context
+end
+
+local function targetReady(agent, context)
+	if not context or typeof(context.Position) ~= "Vector3" then
+		return false
+	end
+	local distance = agent:DistanceTo(context.Position)
+	return distance <= Config.EngageReadyDistance
+		and SlimeNavigation.HasLineOfSight(agent, context.Position, zone)
+end
+
 local function updateStates(now)
+	local pressure = buildPetPressure()
 	for _, agent in ipairs(agents) do
 		if not SlimeHealth.IsAlive(agent.Model) then
 			withdrawAttackTurn(agent)
 			SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
+			SlimeTargeting.Clear(agent)
 			agent:SetState("Defeated", nil)
 			agent:SetCombatReady(false)
 			continue
 		end
 
 		if agent.State == "Attack" then
-			local valid = agent.TargetPlayer and isTargetValid(agent, agent.TargetPlayer, true)
-			if not valid then
+			local ownerValid = agent.TargetPlayer and isTargetValid(agent, agent.TargetPlayer, true)
+			local context = SlimeTargeting.ResolveCurrent(agent, petCombatService, petVitalsService, zone)
+			if not ownerValid then
 				disengage(agent, now)
+			elseif not context then
+				SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
+				local replacement = assignFocus(agent, agent.TargetPlayer, now, pressure)
+				if replacement then
+					if targetReady(agent, replacement) then
+						agent:SetState("Engage", agent.TargetPlayer)
+						agent:SetCombatReady(true)
+					else
+						agent:SetState("Chase", agent.TargetPlayer)
+						agent:SetCombatReady(false)
+					end
+				else
+					disengage(agent, now)
+				end
 			end
 			continue
 		end
 
-		local target = chooseTarget(agent)
-		if target then
-			local targetChanged = target ~= agent.TargetPlayer
-			if targetChanged
+		local owner = chooseOwnerPlayer(agent)
+		if owner then
+			local ownerChanged = owner ~= agent.TargetPlayer
+			if ownerChanged
 				or agent.State == "Idle"
 				or agent.State == "Wander"
 				or agent.State == "Return"
 			then
 				withdrawAttackTurn(agent)
-				agent:EnterNotice(target, now, CombatConfig)
+				SlimeTargeting.Clear(agent)
+				agent:EnterNotice(owner, now, CombatConfig)
 				continue
 			end
 
 			if agent.State == "Notice" then
 				withdrawAttackTurn(agent)
 				if now >= agent.NoticeUntil then
-					agent:SetState("Chase", target)
+					local context = assignFocus(agent, owner, now, pressure)
+					if context and targetReady(agent, context) then
+						agent:SetState("Engage", owner)
+						agent:SetCombatReady(true)
+					else
+						agent:SetState("Chase", owner)
+						agent:SetCombatReady(false)
+					end
 				end
 				continue
 			end
 
-			local root = getRoot(target)
-			local ready = false
-			if root then
-				local distance = agent:DistanceTo(root.Position)
-				ready = distance <= Config.EngageReadyDistance
-					and SlimeNavigation.HasLineOfSight(agent, root.Position, zone)
+			local context = currentOrReviewedFocus(agent, owner, now, pressure)
+			if not context then
+				disengage(agent, now)
+				continue
 			end
-			if ready then
-				agent:SetState("Engage", target)
+			if targetReady(agent, context) then
+				agent:SetState("Engage", owner)
 				agent:SetCombatReady(true)
 			else
 				withdrawAttackTurn(agent)
-				agent:SetState("Chase", target)
+				agent:SetState("Chase", owner)
 				agent:SetCombatReady(false)
 			end
 		elseif agent.State == "Notice" or agent.State == "Chase" or agent.State == "Engage" then
@@ -247,7 +332,10 @@ end
 local function getFormationGoals()
 	local groups = {}
 	for _, agent in ipairs(agents) do
-		if (agent.State == "Chase" or agent.State == "Engage" or agent.State == "Attack") and agent.TargetPlayer then
+		if (agent.State == "Chase" or agent.State == "Engage" or agent.State == "Attack")
+			and agent.TargetPlayer
+			and agent.TargetKind ~= "Pet"
+		then
 			groups[agent.TargetPlayer] = groups[agent.TargetPlayer] or {}
 			table.insert(groups[agent.TargetPlayer], agent)
 		end
@@ -309,6 +397,33 @@ local function chaseSpeedFor(agent, goal)
 	return Config.ChaseSpeed + (Config.ChaseCatchupMaxSpeed - Config.ChaseSpeed) * alpha
 end
 
+local function resolveStrikeTarget(strike)
+	return SlimeTargeting.ResolveStrike(strike, petCombatService, petVitalsService, zone)
+end
+
+local function applyStrikeDamage(strike, currentTarget, amount)
+	if strike.TargetKind == "Pet" then
+		if not petVitalsService or not strike.Player or not strike.PetUid then
+			return false
+		end
+		local applied = petVitalsService.ApplyDamage(strike.Player, strike.PetUid, amount)
+		return applied == true
+	end
+
+	local character = currentTarget.Character
+	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+	local healthBefore = humanoid.Health
+	humanoid:TakeDamage(amount)
+	if character.Parent and humanoid.Health < healthBefore - 0.01 then
+		character:SetAttribute("SlimeHitSerial", (character:GetAttribute("SlimeHitSerial") or 0) + 1)
+		return true
+	end
+	return false
+end
+
 local function stepAgent(agent, formationGoal, now, dt)
 	if not SlimeHealth.IsAlive(agent.Model) then
 		agent.Velocity = Vector3.zero
@@ -319,52 +434,70 @@ local function stepAgent(agent, formationGoal, now, dt)
 	end
 
 	if agent.State == "Attack" then
-		SlimeAttackRuntime.Update(agent, now, zone, CombatConfig)
+		SlimeAttackRuntime.Update(
+			agent,
+			now,
+			zone,
+			CombatConfig,
+			resolveStrikeTarget,
+			applyStrikeDamage
+		)
 		return
 	end
 
 	local rawGoal = agent.Position
 	local speed = 0
 	local facingGoal = nil
-	local targetRoot = agent.TargetPlayer and getRoot(agent.TargetPlayer) or nil
+	local targetContext = SlimeTargeting.ResolveCurrent(agent, petCombatService, petVitalsService, zone)
+	local targetPosition = targetContext and targetContext.Position or nil
 
-	if agent.State == "Notice" and targetRoot then
+	if agent.State == "Notice" and targetPosition then
 		withdrawAttackTurn(agent)
-		agent:FaceToward(targetRoot.Position, dt)
+		agent:FaceToward(targetPosition, dt)
 		if agent.Visual.Animation then
 			agent.Visual.Animation:SetMoving(false)
 		end
 		return
-	elseif agent.State == "Chase" and formationGoal and targetRoot then
+	elseif agent.State == "Chase" and targetPosition then
 		withdrawAttackTurn(agent)
-		rawGoal = formationGoal
+		if targetContext.Kind == "Pet" then
+			rawGoal = targetPosition
+		else
+			rawGoal = formationGoal or targetPosition
+		end
 		speed = chaseSpeedFor(agent, rawGoal)
-		facingGoal = targetRoot.Position
-	elseif agent.State == "Engage" and formationGoal and targetRoot then
-		facingGoal = targetRoot.Position
+		facingGoal = targetPosition
+	elseif agent.State == "Engage" and targetPosition then
+		facingGoal = targetPosition
 		if agent.CombatReady and now >= agent.NextAttackAt then
-			if SlimeAttackRuntime.Begin(agent, agent.TargetPlayer, targetRoot, now, CombatConfig) then
+			if SlimeAttackRuntime.Begin(agent, targetContext, now, CombatConfig) then
 				return
 			end
 		else
 			withdrawAttackTurn(agent)
 		end
 
-		local playerDistance = agent:DistanceTo(targetRoot.Position)
-		local slotDistance = agent:DistanceTo(formationGoal)
-		-- Pawtopia tutorial rule: if the Player walks into a slime, do not backpedal
-		-- just to restore the full staging shell. Hold the achieved position, keep
-		-- facing the Player, and let bounded separation resolve peer overlap.
-		if playerDistance > Config.SoftStageReleaseDistance then
-			rawGoal = formationGoal
-			speed = Config.EngageRepositionSpeed
-		elseif playerDistance > Config.EngageInnerDistance
-			and slotDistance > Config.SoftStageMaxDrift then
-			rawGoal = formationGoal
-			speed = Config.EngageRepositionSpeed
-		else
+		if targetContext.Kind == "Pet" then
+			-- A pet target is already represented by its server-owned combat proxy.
+			-- Hold the achieved duel position instead of chasing a proxy that moves
+			-- with the pet's assigned slime; bounded crowd separation still applies.
 			rawGoal = agent.Position
 			speed = 0
+		elseif formationGoal then
+			local playerDistance = agent:DistanceTo(targetPosition)
+			local slotDistance = agent:DistanceTo(formationGoal)
+			if playerDistance > Config.SoftStageReleaseDistance then
+				rawGoal = formationGoal
+				speed = Config.EngageRepositionSpeed
+			elseif playerDistance > Config.EngageInnerDistance
+				and slotDistance > Config.SoftStageMaxDrift
+			then
+				rawGoal = formationGoal
+				speed = Config.EngageRepositionSpeed
+			else
+				rawGoal = agent.Position
+				speed = 0
+			end
 		end
 	elseif agent.State == "Wander" and agent.WanderTarget then
 		withdrawAttackTurn(agent)
@@ -432,15 +565,22 @@ local function spawnAgents()
 	return authoredLoopCount
 end
 
-function SlimeMovementService.Start()
+function SlimeMovementService.Start(petCombat, petVitals)
 	if running or not Config.Enabled then
 		return
 	end
+	if not petCombat or not petVitals then
+		error("SlimeMovementService requires PetCombatService and PetVitalsService.")
+	end
+	petCombatService = petCombat
+	petVitalsService = petVitals
 	running = true
 	runtimeFolder = getOrCreateRuntimeFolder()
 	local resolved, reason = SlimeZone.new(Config, runtimeFolder)
 	if not resolved then
 		running = false
+		petCombatService = nil
+		petVitalsService = nil
 		warn("[Pawlands Slimes] " .. tostring(reason))
 		if runtimeFolder then
 			runtimeFolder:Destroy()
@@ -460,7 +600,7 @@ function SlimeMovementService.Start()
 		end
 	end)
 	print(string.format(
-		"[Pawlands Slimes] Pawtopia AI + defeat/respawn lifecycle ready with %d slime(s), stable soft-square staging, FIFO tutorial pressure, and %d authored animation loop(s).",
+		"[Pawlands Slimes] Pet-centric 80/20 targeting + defeat/respawn lifecycle ready with %d slime(s), per-target pressure, and %d authored animation loop(s).",
 		#agents,
 		authoredLoopCount
 	))
@@ -478,6 +618,7 @@ function SlimeMovementService.Stop()
 	for _, agent in ipairs(agents) do
 		SlimeAttackScheduler.Withdraw(agent)
 		SlimeAttackRuntime.Cancel(agent, time(), CombatConfig)
+		SlimeTargeting.Clear(agent)
 		agent:Destroy()
 		SlimeFactory.Destroy(agent.Visual)
 	end
@@ -492,6 +633,7 @@ function SlimeMovementService.Stop()
 		runtimeFolder:Destroy()
 	end
 	runtimeFolder, zone = nil, nil
+	petCombatService, petVitalsService = nil, nil
 	accumulator = 0
 end
 

@@ -56,6 +56,9 @@ function SlimeHealth.ApplyDamage(model, amount, player, feedback)
 		model:SetAttribute("AttackQueued", false)
 		model:SetAttribute("AttackTurnActive", false)
 		model:SetAttribute("TargetUserId", 0)
+		model:SetAttribute("TargetType", "None")
+		model:SetAttribute("TargetPetSlot", 0)
+		model:SetAttribute("TargetPetUid", "")
 		model:SetAttribute("SlimeState", "Defeated")
 	end
 

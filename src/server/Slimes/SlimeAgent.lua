@@ -19,6 +19,9 @@ end
 function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 	visual.Model:SetAttribute("AttackTurnActive", false)
 	visual.Model:SetAttribute("AttackQueued", false)
+	visual.Model:SetAttribute("TargetType", "None")
+	visual.Model:SetAttribute("TargetPetSlot", 0)
+	visual.Model:SetAttribute("TargetPetUid", "")
 	local self = setmetatable({
 		Slot = slot,
 		Definition = definition,
@@ -30,6 +33,11 @@ function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 		Facing = Vector3.new(0, 0, 1),
 		State = "Idle",
 		TargetPlayer = nil,
+		TargetKind = nil,
+		TargetKey = nil,
+		TargetPetSlot = nil,
+		TargetPetUid = nil,
+		NextTargetReviewAt = 0,
 		WanderTarget = nil,
 		HomePosition = spawnPosition,
 		IdleUntil = 0,
@@ -77,6 +85,14 @@ function SlimeAgent:SetState(state, targetPlayer)
 	else
 		self.FormationSlot = nil
 		self:SetCombatReady(false)
+		self.TargetKind = nil
+		self.TargetKey = nil
+		self.TargetPetSlot = nil
+		self.TargetPetUid = nil
+		self.NextTargetReviewAt = 0
+		self.Model:SetAttribute("TargetType", "None")
+		self.Model:SetAttribute("TargetPetSlot", 0)
+		self.Model:SetAttribute("TargetPetUid", "")
 	end
 	if targetChanged then
 		-- A new target gets a fresh stable staging assignment. Keeping the old
@@ -228,10 +244,20 @@ end
 
 function SlimeAgent:Destroy()
 	self.TargetPlayer = nil
+	self.TargetKind = nil
+	self.TargetKey = nil
+	self.TargetPetSlot = nil
+	self.TargetPetUid = nil
+	self.NextTargetReviewAt = 0
 	self.WanderTarget = nil
 	self.FormationSlot = nil
 	self.Strike = nil
 	self:SetCombatReady(false)
+	if self.Model then
+		self.Model:SetAttribute("TargetType", "None")
+		self.Model:SetAttribute("TargetPetSlot", 0)
+		self.Model:SetAttribute("TargetPetUid", "")
+	end
 	SlimeNavigation.Reset(self)
 end
 
