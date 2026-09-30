@@ -116,28 +116,51 @@ function PetFollowController.Start()
 			local yaw = math.atan2(-flat.X, -flat.Z)
 			local recall = entry.LastPosition and (root.Position - entry.LastPosition).Magnitude > Config.TeleportDistance
 			entry.LastPosition = root.Position
-			for slot, visual in pairs(entry.Visuals) do
-				local target, targetYaw
-				local assignedSlimeSlot = entry.CombatAssignments and entry.CombatAssignments[slot]
-				local slime = assignedSlimeSlot and slimesBySlot[assignedSlimeSlot]
+
+			local validAssignments = {}
+			local targetPositions = {}
+			for petSlot, assignedSlimeSlot in pairs(entry.CombatAssignments or {}) do
+				local slime = slimesBySlot[assignedSlimeSlot]
 				if slime and slime:GetAttribute("Defeated") ~= true then
 					local slimePosition = slime:GetPivot().Position
 					if (slimePosition - root.Position).Magnitude <= CombatConfig.HardLeashStuds + 2 then
-						local anchor = entry.CombatAnchors[slot]
-						if not anchor or anchor.SlimeSlot ~= assignedSlimeSlot then
-							anchor = {
-								SlimeSlot = assignedSlimeSlot,
-								Direction = CombatFormation.baseDirection(slimePosition, root.Position),
-							}
-							entry.CombatAnchors[slot] = anchor
-						end
-						local attackers = CombatFormation.attackersForTarget(entry.CombatAssignments, assignedSlimeSlot)
-						target = CombatFormation.goal(slot, attackers, slimePosition, anchor.Direction)
-						targetYaw = CombatFormation.facingYaw(target, slimePosition)
+						validAssignments[petSlot] = assignedSlimeSlot
+						targetPositions[assignedSlimeSlot] = slimePosition
 					end
 				end
-				if not target then
-					entry.CombatAnchors[slot] = nil
+			end
+
+			local combatCenter = CombatFormation.combatCenter(validAssignments, targetPositions)
+			local activeAnchorSlots = {}
+			local combatGoals = {}
+			local targetPositionsByPet = {}
+			for petSlot, assignedSlimeSlot in pairs(validAssignments) do
+				local slimePosition = targetPositions[assignedSlimeSlot]
+				local anchor = entry.CombatAnchors[assignedSlimeSlot]
+				if not anchor then
+					anchor = {
+						Direction = CombatFormation.outerDirection(slimePosition, root.Position, combatCenter),
+					}
+					entry.CombatAnchors[assignedSlimeSlot] = anchor
+				end
+				activeAnchorSlots[assignedSlimeSlot] = true
+				local attackers = CombatFormation.attackersForTarget(validAssignments, assignedSlimeSlot)
+				combatGoals[petSlot] = CombatFormation.goal(petSlot, attackers, slimePosition, anchor.Direction)
+				targetPositionsByPet[petSlot] = slimePosition
+			end
+			for slimeSlot in pairs(entry.CombatAnchors) do
+				if not activeAnchorSlots[slimeSlot] then
+					entry.CombatAnchors[slimeSlot] = nil
+				end
+			end
+			combatGoals = CombatFormation.resolveSpacing(combatGoals, targetPositionsByPet)
+
+			for slot, visual in pairs(entry.Visuals) do
+				local target = combatGoals[slot]
+				local targetYaw
+				if target then
+					targetYaw = CombatFormation.facingYaw(target, targetPositionsByPet[slot])
+				else
 					local x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
 					target = frame:PointToWorldSpace(Vector3.new(x, 0, z))
 					targetYaw = yaw
