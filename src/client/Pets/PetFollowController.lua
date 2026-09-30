@@ -8,9 +8,30 @@ local Formation = require(script.Parent.Follow.Formation)
 local GroundProbe = require(script.Parent.Follow.GroundProbe)
 local VisualFactory = require(script.Parent.Follow.VisualFactory)
 local Motion = require(script.Parent.Follow.FollowMotion)
+local CombatConfig = require(Shared.Config.PetCombat)
+local CombatObserver = require(script.Parent.Combat.CombatAssignmentObserver)
+local CombatFormation = require(script.Parent.Combat.CombatFormation)
+local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 
 local PetFollowController = {}
 local stopCurrent
+
+local function slimeModelsBySlot()
+	local result = {}
+	local folder = Workspace:FindFirstChild(SlimeMovementConfig.RuntimeFolderName)
+	if not folder or not folder:IsA("Folder") then
+		return result
+	end
+	for _, model in ipairs(folder:GetChildren()) do
+		if model:IsA("Model") and model:GetAttribute("Defeated") ~= true then
+			local slot = tonumber(model:GetAttribute("SlimeSlot"))
+			if slot then
+				result[math.floor(slot)] = model
+			end
+		end
+	end
+	return result
+end
 
 function PetFollowController.Start()
 	if stopCurrent then
@@ -30,9 +51,21 @@ function PetFollowController.Start()
 	end
 	local stopObserver = Observer.Start(function(player, party, character)
 		remove(player)
-		entries[player] = { Party = party, Character = character, Visuals = {}, RetryAt = 0 }
+		entries[player] = { Party = party, Character = character, Visuals = {}, RetryAt = 0, CombatAssignments = {}, CombatAnchors = {} }
 		probe:Refresh()
 	end, remove)
+
+	local stopCombatObserver = CombatObserver.Start(function(player, assignments)
+		local entry = entries[player]
+		if entry then
+			entry.CombatAssignments = assignments
+		end
+	end, function(player)
+		local entry = entries[player]
+		if entry then
+			entry.CombatAssignments = {}
+		end
+	end)
 
 	local renderConnection = RunService.PreRender:Connect(function(frameDt)
 		if frameDt <= 0 then
@@ -40,6 +73,7 @@ function PetFollowController.Start()
 		end
 		local dt, clock = math.min(frameDt, 0.1), os.clock()
 		local localCharacter = Players.LocalPlayer.Character
+		local slimesBySlot = slimeModelsBySlot()
 		local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
 		for player, entry in pairs(entries) do
 			local character = entry.Character
@@ -83,9 +117,32 @@ function PetFollowController.Start()
 			local recall = entry.LastPosition and (root.Position - entry.LastPosition).Magnitude > Config.TeleportDistance
 			entry.LastPosition = root.Position
 			for slot, visual in pairs(entry.Visuals) do
-				local x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
-				local target = frame:PointToWorldSpace(Vector3.new(x, 0, z))
-				if Motion.step(visual, target, root, yaw, dt, clock, probe, recall) then
+				local target, targetYaw
+				local assignedSlimeSlot = entry.CombatAssignments and entry.CombatAssignments[slot]
+				local slime = assignedSlimeSlot and slimesBySlot[assignedSlimeSlot]
+				if slime and slime:GetAttribute("Defeated") ~= true then
+					local slimePosition = slime:GetPivot().Position
+					if (slimePosition - root.Position).Magnitude <= CombatConfig.HardLeashStuds + 2 then
+						local anchor = entry.CombatAnchors[slot]
+						if not anchor or anchor.SlimeSlot ~= assignedSlimeSlot then
+							anchor = {
+								SlimeSlot = assignedSlimeSlot,
+								Direction = CombatFormation.baseDirection(slimePosition, root.Position),
+							}
+							entry.CombatAnchors[slot] = anchor
+						end
+						local attackers = CombatFormation.attackersForTarget(entry.CombatAssignments, assignedSlimeSlot)
+						target = CombatFormation.goal(slot, attackers, slimePosition, anchor.Direction)
+						targetYaw = CombatFormation.facingYaw(target, slimePosition)
+					end
+				end
+				if not target then
+					entry.CombatAnchors[slot] = nil
+					local x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
+					target = frame:PointToWorldSpace(Vector3.new(x, 0, z))
+					targetYaw = yaw
+				end
+				if Motion.step(visual, target, root, targetYaw or yaw, dt, clock, probe, recall) then
 					visual.Model.Parent = folder
 				else
 					VisualFactory.hide(visual)
@@ -95,6 +152,7 @@ function PetFollowController.Start()
 	end)
 	stopCurrent = function()
 		renderConnection:Disconnect()
+		stopCombatObserver()
 		stopObserver()
 		folder:Destroy()
 	end
