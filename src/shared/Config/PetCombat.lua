@@ -74,13 +74,14 @@ return table.freeze({
 	AttackImpactAlpha = 0.50,
 	DefaultDamage = 12,
 	ServerImpactCadenceToleranceSeconds = 0.18,
-	ServerImpactLateToleranceSeconds = 0.45,
 	ServerImpactLeashPaddingStuds = 2.0,
 
 	-- Pawtopia-inspired strike authority adapted to Pawlands' client-owned Pet
 	-- visuals. The server advances a lightweight virtual Pet proxy toward the same
 	-- shared combat goal, gates impact until that proxy is attack-ready, and then
 	-- validates current contact or committed target drift before applying damage.
+	-- Impact timing is lower-bounded only: missing an earlier visual beat must not
+	-- permanently deadlock later legitimate Pet impacts.
 	ServerProxyReadyToleranceStuds = 1.75,
 	ServerStrikeMaxProxyDistanceStuds = 6.25,
 	ServerStrikeCommitMaxTargetDriftStuds = 6.25,

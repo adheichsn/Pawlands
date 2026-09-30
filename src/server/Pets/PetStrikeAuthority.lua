@@ -142,9 +142,16 @@ function PetStrikeAuthority.ValidateImpact(guard, entry, slimePosition, clock)
 	if clock + Config.ServerImpactCadenceToleranceSeconds < nextImpactAt then
 		return false, "EarlyImpact"
 	end
-	if clock - nextImpactAt > Config.ServerImpactLateToleranceSeconds then
-		return false, "LateImpact"
-	end
+
+	-- Do not reject a legitimate authored impact just because an earlier impact
+	-- window was missed while the server proxy was still approaching. The old
+	-- late-window gate could deadlock this guard forever: once one impact was
+	-- rejected as ProxyNotReady/EarlyImpact, every later client impact became
+	-- LateImpact because NextImpactAt only advances after an accepted hit.
+	--
+	-- NextImpactAt is therefore an *earliest allowed* time, not a narrow hit
+	-- appointment. Accepted hits still advance it by AttackCadenceSeconds, so
+	-- spam/early impacts remain server-gated.
 
 	local currentDistance = horizontalDistance(guard.ProxyPosition, slimePosition)
 	local inCurrentRange = currentDistance <= Config.ServerStrikeMaxProxyDistanceStuds
