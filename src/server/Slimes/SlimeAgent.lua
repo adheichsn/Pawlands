@@ -38,6 +38,7 @@ function SlimeAgent.new(slot, definition, visual, spawnPosition, config)
 		TargetPetSlot = nil,
 		TargetPetUid = nil,
 		NextTargetReviewAt = 0,
+		TargetPlayerHitSerialAtAcquire = 0,
 		WanderTarget = nil,
 		HomePosition = spawnPosition,
 		IdleUntil = 0,
@@ -90,6 +91,7 @@ function SlimeAgent:SetState(state, targetPlayer)
 		self.TargetPetSlot = nil
 		self.TargetPetUid = nil
 		self.NextTargetReviewAt = 0
+		self.TargetPlayerHitSerialAtAcquire = 0
 		self.Model:SetAttribute("TargetType", "None")
 		self.Model:SetAttribute("TargetPetSlot", 0)
 		self.Model:SetAttribute("TargetPetUid", "")
@@ -249,6 +251,7 @@ function SlimeAgent:Destroy()
 	self.TargetPetSlot = nil
 	self.TargetPetUid = nil
 	self.NextTargetReviewAt = 0
+	self.TargetPlayerHitSerialAtAcquire = 0
 	self.WanderTarget = nil
 	self.FormationSlot = nil
 	self.Strike = nil

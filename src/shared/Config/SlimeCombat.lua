@@ -10,12 +10,13 @@ return table.freeze({
 	AttackStaggerSeconds = 0.00,
 	PlayerPressureCooldownSeconds = 2.20,
 
-	-- Pet-centric targeting: slimes prefer active combat pets while the Player
-	-- remains a meaningful pressure target. The choice is sticky per target
-	-- window rather than re-rolled every strike.
-	PetTargetChance = 0.80,
+	-- Pet-centric target ownership. A slime prefers a healthy pet that is
+	-- actually assigned to fight it and keeps that opponent until invalid. The
+	-- Player can intentionally pull aggro only after sustained direct pressure.
 	TargetStickMinSeconds = 2.50,
-	TargetStickMaxSeconds = 3.50,
+	TargetReviewIntervalSeconds = 0.45,
+	PlayerTakeoverHitCount = 3,
+	PlayerTakeoverWindowSeconds = 2.40,
 	MaxSlimesPerPet = 2,
 	PetPressureCooldownSeconds = 2.20,
 	AttackCancelGapSeconds = 0.00,

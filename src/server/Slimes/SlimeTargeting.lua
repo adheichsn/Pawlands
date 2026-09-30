@@ -55,6 +55,32 @@ local function petContexts(player, petCombatService, vitalsService, zone)
 	return result
 end
 
+local function linkedPetCandidates(agent, player, petCombatService, vitalsService, zone, config, pressure)
+	local linked = {}
+	for _, context in ipairs(petContexts(player, petCombatService, vitalsService, zone)) do
+		if context.AssignedSlimeModel == agent.Model then
+			local count = pressure[context.Key] or 0
+			if count < math.max(1, config.MaxSlimesPerPet or 2) then
+				table.insert(linked, context)
+			end
+		end
+	end
+	table.sort(linked, function(a, b)
+		local aPressure = pressure[a.Key] or 0
+		local bPressure = pressure[b.Key] or 0
+		if aPressure ~= bPressure then
+			return aPressure < bPressure
+		end
+		local aDistance = agent:DistanceTo(a.Position)
+		local bDistance = agent:DistanceTo(b.Position)
+		if math.abs(aDistance - bDistance) > 0.01 then
+			return aDistance < bDistance
+		end
+		return a.PetSlot < b.PetSlot
+	end)
+	return linked
+end
+
 function SlimeTargeting.ResolveStrike(strike, petCombatService, vitalsService, zone)
 	if not strike or not strike.Player then
 		return nil
@@ -77,7 +103,7 @@ function SlimeTargeting.ResolveCurrent(agent, petCombatService, vitalsService, z
 	end
 	if agent.TargetKind == "Pet" and agent.TargetPetUid then
 		for _, context in ipairs(petContexts(player, petCombatService, vitalsService, zone)) do
-			if context.PetUid == agent.TargetPetUid then
+			if context.PetUid == agent.TargetPetUid and context.AssignedSlimeModel == agent.Model then
 				return context
 			end
 		end
@@ -86,48 +112,26 @@ function SlimeTargeting.ResolveCurrent(agent, petCombatService, vitalsService, z
 	return resolvePlayer(player, zone)
 end
 
-function SlimeTargeting.Select(agent, player, petCombatService, vitalsService, zone, config, pressure, randomObject)
+function SlimeTargeting.Select(agent, player, petCombatService, vitalsService, zone, config, pressure, _randomObject)
 	local playerContext = resolvePlayer(player, zone)
 	if not playerContext then
 		return nil
 	end
 
-	local candidates = petContexts(player, petCombatService, vitalsService, zone)
-	local available = {}
-	for _, context in ipairs(candidates) do
-		local count = pressure[context.Key] or 0
-		if count < math.max(1, config.MaxSlimesPerPet or 2) then
-			table.insert(available, context)
-		end
+	-- Engagement ownership wins over periodic weighted rerolls. A healthy Pet that
+	-- is actually fighting this slime becomes the readable primary opponent.
+	local linked = linkedPetCandidates(agent, player, petCombatService, vitalsService, zone, config, pressure)
+	if #linked > 0 then
+		return linked[1]
 	end
 
-	local choosePet = #available > 0 and randomObject:NextNumber() < math.clamp(config.PetTargetChance or 0.8, 0, 1)
-	if not choosePet then
-		return playerContext
-	end
-
-	table.sort(available, function(a, b)
-		local aPressure = pressure[a.Key] or 0
-		local bPressure = pressure[b.Key] or 0
-		if aPressure ~= bPressure then
-			return aPressure < bPressure
-		end
-		local aSelf = a.AssignedSlimeModel == agent.Model
-		local bSelf = b.AssignedSlimeModel == agent.Model
-		if aSelf ~= bSelf then
-			return aSelf
-		end
-		local aDistance = agent:DistanceTo(a.Position)
-		local bDistance = agent:DistanceTo(b.Position)
-		if math.abs(aDistance - bDistance) > 0.01 then
-			return aDistance < bDistance
-		end
-		return a.PetSlot < b.PetSlot
-	end)
-	return available[1] or playerContext
+	-- No linked healthy Pet means the Player is the safe fallback. This also
+	-- covers zero-pet and all-pets-KO states without cross-targeting somebody
+	-- else's duel partner.
+	return playerContext
 end
 
-function SlimeTargeting.Assign(agent, context, now, config, randomObject)
+function SlimeTargeting.Assign(agent, context, now, config, _randomObject)
 	if not context then
 		return false
 	end
@@ -139,15 +143,40 @@ function SlimeTargeting.Assign(agent, context, now, config, randomObject)
 	agent.TargetKey = context.Key
 	agent.TargetPetSlot = context.PetSlot
 	agent.TargetPetUid = context.PetUid
-	agent.NextTargetReviewAt = now + randomObject:NextNumber(
-		math.max(0.1, config.TargetStickMinSeconds or 2.5),
-		math.max(config.TargetStickMinSeconds or 2.5, config.TargetStickMaxSeconds or 3.5)
-	)
+	agent.NextTargetReviewAt = now + math.max(0.1, config.TargetStickMinSeconds or 2.5)
+	agent.TargetPlayerHitSerialAtAcquire = tonumber(agent.Model:GetAttribute("PlayerHitSerial")) or 0
 
 	agent.Model:SetAttribute("TargetType", context.Kind)
 	agent.Model:SetAttribute("TargetPetSlot", context.PetSlot or 0)
 	agent.Model:SetAttribute("TargetPetUid", context.PetUid or "")
 	return changed
+end
+
+function SlimeTargeting.TryPlayerTakeover(agent, zone, config, now)
+	if agent.TargetKind ~= "Pet" or not agent.TargetPlayer then
+		return nil
+	end
+	if now < (agent.NextTargetReviewAt or 0) then
+		return nil
+	end
+
+	local currentSerial = tonumber(agent.Model:GetAttribute("PlayerHitSerial")) or 0
+	local baseline = tonumber(agent.TargetPlayerHitSerialAtAcquire) or currentSerial
+	local directHits = math.max(0, currentSerial - baseline)
+	local requiredHits = math.max(1, math.floor(tonumber(config.PlayerTakeoverHitCount) or 3))
+	local lastHitAt = tonumber(agent.Model:GetAttribute("LastPlayerHitAt")) or 0
+	local lastHitUserId = tonumber(agent.Model:GetAttribute("LastPlayerHitUserId")) or 0
+	local recentWindow = math.max(0.1, tonumber(config.PlayerTakeoverWindowSeconds) or 2.4)
+
+	if directHits < requiredHits
+		or lastHitUserId ~= agent.TargetPlayer.UserId
+		or now - lastHitAt > recentWindow
+	then
+		agent.NextTargetReviewAt = now + math.max(0.1, tonumber(config.TargetReviewIntervalSeconds) or 0.45)
+		return nil
+	end
+
+	return resolvePlayer(agent.TargetPlayer, zone)
 end
 
 function SlimeTargeting.Clear(agent)
@@ -156,6 +185,7 @@ function SlimeTargeting.Clear(agent)
 	agent.TargetPetSlot = nil
 	agent.TargetPetUid = nil
 	agent.NextTargetReviewAt = 0
+	agent.TargetPlayerHitSerialAtAcquire = 0
 	if agent.Model then
 		agent.Model:SetAttribute("TargetType", "None")
 		agent.Model:SetAttribute("TargetPetSlot", 0)

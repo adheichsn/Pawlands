@@ -1,6 +1,8 @@
 return table.freeze({
 	AssignmentAttributeName = "PawlandsPetCombat",
-	MaxAttackersPerNormalSlime = 2,
+	-- Adaptive focus fire keeps pets spread while multiple slimes are alive, then
+	-- lets the whole party collapse onto the last available target.
+	MaxAttackersPerNormalSlime = 4,
 	SoftLeashStuds = 30,
 	HardLeashStuds = 45,
 	UpdateRate = 10,
@@ -16,6 +18,18 @@ return table.freeze({
 	MinCombatPetSpacingStuds = 4.75,
 	CombatSpacingPasses = 2,
 	CombatSpacingMaxCorrectionStuds = 1.35,
+
+	-- Target handoff presentation. Retarget/return movement is capped so a dead
+	-- target cannot make a pet visually snap or "whoosh" across the arena.
+	RetargetRecoverSeconds = 0.24,
+	ReturnRecoverSeconds = 0.30,
+	TransitionStaggerSeconds = 0.045,
+	TransitionSettleRadiusStuds = 1.20,
+	CombatApproachFollowSpeed = 6.0,
+	CombatApproachMaxSpeedStuds = 18.0,
+	RetargetMaxSpeedStuds = 15.5,
+	ReturnFollowSpeed = 4.8,
+	ReturnMaxSpeedStuds = 12.5,
 
 	-- Pet attack presentation combines two useful reference ideas:
 	-- PS99: pets first settle into a stable target placement.

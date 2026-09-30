@@ -68,6 +68,28 @@ function Formation.outerDirection(slimePosition, playerPosition, combatCenter)
 	return Formation.baseDirection(slimePosition, playerPosition)
 end
 
+local function attackerAngle(index, count)
+	if count <= 1 then
+		return 0
+	end
+	if count == 2 then
+		return math.rad(index == 1 and -Config.PairHalfAngleDegrees or Config.PairHalfAngleDegrees)
+	end
+	if count == 3 then
+		local angles = { -90, 0, 90 }
+		return math.rad(angles[index] or 0)
+	end
+	if count == 4 then
+		-- Four-way focus fire surrounds the last slime without placing a pet
+		-- directly on the Player/slime center line.
+		local angles = { -135, -45, 45, 135 }
+		return math.rad(angles[index] or 0)
+	end
+
+	-- Future-proof fallback if party limits ever grow beyond four.
+	return ((index - 0.5) / count) * (math.pi * 2) - math.pi
+end
+
 function Formation.goal(petSlot, attackerSlots, slimePosition, baseDirection)
 	local direction = baseDirection
 	if not direction or direction.Magnitude <= 0.001 then
@@ -76,12 +98,8 @@ function Formation.goal(petSlot, attackerSlots, slimePosition, baseDirection)
 		direction = direction.Unit
 	end
 
-	local angle = 0
-	if #attackerSlots >= 2 then
-		local index = table.find(attackerSlots, petSlot) or 1
-		angle = math.rad(index == 1 and -Config.PairHalfAngleDegrees or Config.PairHalfAngleDegrees)
-	end
-	direction = rotateY(direction, angle)
+	local index = table.find(attackerSlots, petSlot) or 1
+	direction = rotateY(direction, attackerAngle(index, math.max(1, #attackerSlots)))
 	return slimePosition + direction * Config.AttackRadiusStuds
 end
 

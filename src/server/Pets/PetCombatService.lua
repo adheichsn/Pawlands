@@ -330,6 +330,31 @@ local function stepPlayer(player)
 		byModel[target.Model] = target
 	end
 
+	local activePetCount = 0
+	for _, uid in ipairs(party) do
+		if not vitalsService or vitalsService.CanCombat(player, uid) then
+			activePetCount += 1
+		end
+	end
+
+	-- Adaptive focus fire: spread healthy pets across available slimes first,
+	-- then collapse remaining pets onto the same targets. With four healthy pets
+	-- this naturally resolves as 1/1/1/1, 2/1/1, 2/2, then 4 on the last slime.
+	local acquirableTargetCount = 0
+	for _, target in ipairs(targets) do
+		if target.Distance <= Config.SoftLeashStuds then
+			acquirableTargetCount += 1
+		end
+	end
+	local attackerCapacity = 0
+	if activePetCount > 0 and #targets > 0 then
+		local distributionTargetCount = math.max(1, acquirableTargetCount)
+		attackerCapacity = math.min(
+			math.max(1, Config.MaxAttackersPerNormalSlime),
+			math.max(1, math.ceil(activePetCount / distributionTargetCount))
+		)
+	end
+
 	local nextAssignments = {}
 	local counts = {}
 	for petSlot = 1, #party do
@@ -337,9 +362,9 @@ local function stepPlayer(player)
 		local canCombat = not vitalsService or vitalsService.CanCombat(player, uid)
 		local targetModel = canCombat and state.Assignments[petSlot] or nil
 		local target = targetModel and byModel[targetModel]
-		if target and target.Distance <= Config.HardLeashStuds then
+		if target and target.Distance <= Config.HardLeashStuds and attackerCapacity > 0 then
 			local count = counts[target.Model] or 0
-			if count < Config.MaxAttackersPerNormalSlime then
+			if count < attackerCapacity then
 				nextAssignments[petSlot] = target.Model
 				counts[target.Model] = count + 1
 			end
@@ -351,7 +376,7 @@ local function stepPlayer(player)
 		for _, target in ipairs(targets) do
 			if target.Distance <= Config.SoftLeashStuds then
 				local count = counts[target.Model] or 0
-				if count < Config.MaxAttackersPerNormalSlime then
+				if count < attackerCapacity then
 					local bestCount = best and (counts[best.Model] or 0) or math.huge
 					if not best
 						or count < bestCount
@@ -372,7 +397,7 @@ local function stepPlayer(player)
 		if canCombat and not nextAssignments[petSlot] then
 			local target = chooseTarget()
 			if not target then
-				break
+				continue
 			end
 			nextAssignments[petSlot] = target.Model
 			counts[target.Model] = (counts[target.Model] or 0) + 1

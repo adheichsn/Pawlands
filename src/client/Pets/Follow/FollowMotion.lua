@@ -6,7 +6,7 @@ local function alpha(speed, dt)
 	return 1 - math.exp(-speed * dt)
 end
 
-function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, recall, presentationOffset)
+function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, recall, presentationOffset, motionProfile)
 	local targetY = probe:Height(target.X, target.Z, root.Position.Y)
 	if not targetY then
 		-- Recover near the player at an edge or across an unloaded gap.
@@ -29,7 +29,17 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 		visual.Walk = 0
 		visual.Yaw = nil
 	end
-	local position = previous:Lerp(goal, alpha(Config.FollowSpeed, dt))
+	local followSpeed = motionProfile and motionProfile.FollowSpeed or Config.FollowSpeed
+	local position = previous:Lerp(goal, alpha(followSpeed, dt))
+	local maxHorizontalSpeed = motionProfile and motionProfile.MaxHorizontalSpeed
+	if not recall and maxHorizontalSpeed ~= nil then
+		local delta = Vector3.new(position.X - previous.X, 0, position.Z - previous.Z)
+		local maxStep = math.max(0, maxHorizontalSpeed) * dt
+		if delta.Magnitude > maxStep and delta.Magnitude > 0.001 then
+			local bounded = delta.Unit * maxStep
+			position = Vector3.new(previous.X + bounded.X, position.Y, previous.Z + bounded.Z)
+		end
+	end
 	local groundY = probe:Height(position.X, position.Z, root.Position.Y)
 	if not groundY then
 		position, groundY = goal, targetY

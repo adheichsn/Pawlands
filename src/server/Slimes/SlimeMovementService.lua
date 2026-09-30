@@ -210,11 +210,25 @@ end
 
 local function currentOrReviewedFocus(agent, player, now, pressure)
 	local context = SlimeTargeting.ResolveCurrent(agent, petCombatService, petVitalsService, zone)
-	if not context or now >= (agent.NextTargetReviewAt or 0) then
-		if context and context.Kind == "Pet" then
-			pressure[context.Key] = math.max(0, (pressure[context.Key] or 0) - 1)
-		end
+	if not context then
 		return assignFocus(agent, player, now, pressure)
+	end
+
+	-- A valid opponent is sticky. Review windows no longer re-roll 80/20 and
+	-- randomly pull a slime off a Pet duel. The only voluntary takeover is a
+	-- deliberate Player retaliation after enough recent direct hits.
+	if context.Kind == "Pet" and now >= (agent.NextTargetReviewAt or 0) then
+		local takeover = SlimeTargeting.TryPlayerTakeover(agent, zone, CombatConfig, now)
+		if takeover then
+			pressure[context.Key] = math.max(0, (pressure[context.Key] or 0) - 1)
+			local changed = SlimeTargeting.Assign(agent, takeover, now, CombatConfig, randomObject)
+			if changed then
+				withdrawAttackTurn(agent)
+				agent.FormationSlot = nil
+				SlimeNavigation.Reset(agent)
+			end
+			return takeover
+		end
 	end
 	return context
 end
@@ -600,7 +614,7 @@ function SlimeMovementService.Start(petCombat, petVitals)
 		end
 	end)
 	print(string.format(
-		"[Pawlands Slimes] Pet-centric 80/20 targeting + defeat/respawn lifecycle ready with %d slime(s), per-target pressure, and %d authored animation loop(s).",
+		"[Pawlands Slimes] Pet-first target ownership + Player retaliation takeover ready with %d slime(s), per-target pressure, and %d authored animation loop(s).",
 		#agents,
 		authoredLoopCount
 	))
