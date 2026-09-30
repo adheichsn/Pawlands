@@ -22,7 +22,7 @@ function VisualFactory.create(id, ownerId, slot)
 			item.CanCollide = false
 			item.CanTouch = false
 			item.CanQuery = false
-			item.CastShadow = false
+			item.CastShadow = true
 		elseif item:IsA("LuaSourceContainer") then
 			item:Destroy()
 		end

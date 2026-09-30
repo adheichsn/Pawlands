@@ -1,5 +1,6 @@
 local PetFollowController = require(script.Parent.Pets.PetFollowController)
 local PetCombatFeedbackController = require(script.Parent.Pets.Combat.PetCombatFeedbackController)
+local PetHealthbarController = require(script.Parent.Pets.Combat.PetHealthbarController)
 local PlayerMovementController = require(script.Parent.Player.PlayerMovementController)
 local PlayerCombatController = require(script.Parent.Combat.PlayerCombatController)
 local PlayerHitReactionController = require(script.Parent.Combat.PlayerHitReactionController)
@@ -8,6 +9,7 @@ local SlimeFeedbackController = require(script.Parent.Slimes.SlimeFeedbackContro
 
 PetFollowController.Start()
 PetCombatFeedbackController.Start()
+PetHealthbarController.Start()
 PlayerMovementController.Start()
 PlayerCombatController.Start()
 PlayerHitReactionController.Start()
@@ -15,6 +17,7 @@ SlimeHealthbarController.Start()
 SlimeFeedbackController.Start()
 
 script.Destroying:Connect(function()
+	PetHealthbarController.Stop()
 	SlimeFeedbackController.Stop()
 	SlimeHealthbarController.Stop()
 	PlayerHitReactionController.Stop()

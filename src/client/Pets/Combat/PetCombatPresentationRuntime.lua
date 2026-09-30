@@ -39,7 +39,12 @@ local function getState(ownerUserId, petSlot)
 	end
 	state = {
 		HitStartedAt = -math.huge,
+		HitFacingYaw = nil,
 		LastHitDirection = nil,
+		LastHealth = nil,
+		PendingRemoteHitAt = -math.huge,
+		PendingRemoteHitDirection = nil,
+		LastConsumedRemoteHitAt = -math.huge,
 		EventKnockedOut = false,
 		EventRecoverAt = 0,
 		WasKnockedOut = false,
@@ -86,22 +91,38 @@ local function isKnockedOut(state, vitals)
 	return false
 end
 
+local function directionAwayFromTarget(visual, targetPosition)
+	if visual.Position and typeof(targetPosition) == "Vector3" then
+		return normalizedHorizontal(visual.Position - targetPosition)
+	end
+	return nil
+end
+
 local function resolveAwayDirection(state, visual, targetPosition)
-	local direction = state.LastHitDirection
+	-- Match Pawtopia's combat readability first: recoil away from the Pet's own
+	-- offensive target. Incoming Slime metadata is only a fallback when no target
+	-- position is available. Secondary pressure must never rotate the Pet toward
+	-- an attacker it is not fighting.
+	local direction = directionAwayFromTarget(visual, targetPosition)
 	if direction then
 		return direction
 	end
-	if visual.Position and typeof(targetPosition) == "Vector3" then
-		direction = normalizedHorizontal(visual.Position - targetPosition)
-		if direction then
-			return direction
-		end
+	if state.LastHitDirection then
+		return state.LastHitDirection
 	end
 	local yaw = visual.Yaw
 	if type(yaw) == "number" then
 		return Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
 	end
 	return Vector3.new(0, 0, 1)
+end
+
+local function beginHitReaction(state, visual, targetPosition, targetYaw, clock, preferredDirection)
+	state.HitStartedAt = clock
+	state.HitFacingYaw = visual.Yaw or targetYaw
+	state.LastHitDirection = directionAwayFromTarget(visual, targetPosition)
+		or normalizedHorizontal(preferredDirection)
+		or state.LastHitDirection
 end
 
 function PetCombatPresentationRuntime.RecordHit(ownerUserId, petSlot, knockedOut, recoverAt, hitDirection)
@@ -114,8 +135,12 @@ function PetCombatPresentationRuntime.RecordHit(ownerUserId, petSlot, knockedOut
 	end
 
 	local state = getState(ownerUserId, petSlot)
-	state.HitStartedAt = os.clock()
-	state.LastHitDirection = normalizedHorizontal(hitDirection)
+	-- Do not directly mutate facing/recoil from the RemoteEvent callback. Pawtopia
+	-- derives its Pet hit reaction from replicated Health. Pawlands keeps this
+	-- server-confirmed event as immediate metadata/fallback, then consumes it from
+	-- the normal Pet presentation step where target/facing context is available.
+	state.PendingRemoteHitAt = os.clock()
+	state.PendingRemoteHitDirection = normalizedHorizontal(hitDirection)
 	if knockedOut == true then
 		state.EventKnockedOut = true
 		state.EventRecoverAt = math.max(tonumber(recoverAt) or 0, Workspace:GetServerTimeNow() + 0.1)
@@ -125,6 +150,55 @@ end
 function PetCombatPresentationRuntime.Step(ownerUserId, petSlot, visual, vitals, targetPosition, clock, target, targetYaw, attackOffset, motionProfile)
 	local state = getState(ownerUserId, petSlot)
 	local knockedOut = isKnockedOut(state, vitals)
+
+	-- Pawtopia parity: a replicated HP decrease is the canonical proof that the
+	-- Pet was actually hit. The server feedback RemoteEvent remains a fallback for
+	-- the first/streaming frame and supplies the committed strike direction.
+	local health = type(vitals) == "table" and tonumber(vitals.Health) or nil
+	local healthDropped = health ~= nil
+		and state.LastHealth ~= nil
+		and health < state.LastHealth - 0.001
+	local pendingRemote = state.PendingRemoteHitAt > state.LastConsumedRemoteHitAt
+	local remoteAge = clock - state.PendingRemoteHitAt
+	local remoteFallbackReady = pendingRemote and remoteAge >= 0 and remoteAge <= 0.20
+	local recentReaction = clock - state.HitStartedAt <= Config.PetHitRemoteDedupSeconds
+
+	if healthDropped then
+		if not recentReaction then
+			beginHitReaction(
+				state,
+				visual,
+				targetPosition,
+				targetYaw,
+				clock,
+				state.PendingRemoteHitDirection
+			)
+		end
+		if pendingRemote then
+			state.LastConsumedRemoteHitAt = state.PendingRemoteHitAt
+		end
+	elseif remoteFallbackReady then
+		-- Attribute replication normally lands with/before the next presentation
+		-- frames. If it does not, the RemoteEvent itself is still emitted only after
+		-- authoritative damage succeeds, so it is a safe presentation fallback.
+		if not recentReaction then
+			beginHitReaction(
+				state,
+				visual,
+				targetPosition,
+				targetYaw,
+				clock,
+				state.PendingRemoteHitDirection
+			)
+		end
+		state.LastConsumedRemoteHitAt = state.PendingRemoteHitAt
+	end
+	if pendingRemote and remoteAge > 0.20 then
+		state.LastConsumedRemoteHitAt = state.PendingRemoteHitAt
+	end
+	if health ~= nil then
+		state.LastHealth = health
+	end
 
 	if knockedOut and not state.WasKnockedOut then
 		state.KnockoutStartedAt = clock
@@ -171,6 +245,18 @@ function PetCombatPresentationRuntime.Step(ownerUserId, petSlot, visual, vitals,
 			local t = hitAge / math.max(0.01, Config.PetHitRecoilSeconds)
 			local away = state.LastHitDirection or Vector3.zero
 			offset += away * (math.sin(t * math.pi) * Config.PetHitRecoilStuds)
+
+			-- Pawlands adaptation of Pawtopia's state-driven facing: keep the exact
+			-- pre-impact yaw for a very short beat. The hit should read as recoil, not
+			-- as the Pet turning to acknowledge whichever Slime happened to strike it.
+			if hitAge <= Config.PetHitFacingHoldSeconds and state.HitFacingYaw ~= nil then
+				targetYaw = state.HitFacingYaw
+			end
+			profile = mergeProfile(profile, {
+				SuppressAmbientMotion = true,
+			})
+		elseif hitAge > Config.PetHitRecoilSeconds then
+			state.HitFacingYaw = nil
 		end
 
 		local recoveryAge = clock - state.RecoveryStartedAt

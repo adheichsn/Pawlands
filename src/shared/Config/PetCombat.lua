@@ -43,6 +43,12 @@ return table.freeze({
 	-- or combat positioning authority; they only add readable recoil/down/recovery.
 	PetHitRecoilSeconds = 0.24,
 	PetHitRecoilStuds = 0.68,
+	-- Pawtopia-style hit readability: hold the pre-impact yaw briefly so a Pet
+	-- reads as being struck instead of visually snapping toward a new facing goal.
+	-- Replicated Health decrease is the canonical hit signal; the feedback remote
+	-- remains an immediate server-confirmed timing/direction fallback.
+	PetHitFacingHoldSeconds = 0.12,
+	PetHitRemoteDedupSeconds = 0.18,
 	PetKnockoutBackStuds = 1.0,
 	PetKnockoutPushSeconds = 0.16,
 	PetKnockoutPitchDegrees = -8,
