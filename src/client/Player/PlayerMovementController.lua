@@ -11,6 +11,12 @@ local PlayerMovementController = {}
 local stopCurrent
 local activeRunToggle
 
+local function isMovementLocked()
+	-- Inventory remains an interaction/action lock so combat clicks and overlapping
+	-- modals stay blocked, but it does not freeze local locomotion.
+	return InteractionLock.IsLockedExcept("Inventory")
+end
+
 local function disableDefaultAnimate(character)
 	local function disable(instance)
 		if instance.Name == "Animate" and instance:IsA("LocalScript") then
@@ -47,6 +53,7 @@ function PlayerMovementController.Start()
 	local activeHumanoid
 	local activeRoot
 	local jumpStateWasEnabled
+	local movementLockedState
 
 	local function cancelSpeedTween()
 		if speedTween then
@@ -56,6 +63,12 @@ function PlayerMovementController.Start()
 	end
 
 	local function setMovementLocked(locked)
+		locked = locked == true
+		if movementLockedState == locked then
+			return
+		end
+		movementLockedState = locked
+
 		local humanoid = activeHumanoid
 		if not humanoid or not humanoid.Parent then
 			return
@@ -91,6 +104,7 @@ function PlayerMovementController.Start()
 			activeHumanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, jumpStateWasEnabled)
 		end
 		jumpStateWasEnabled = nil
+		movementLockedState = nil
 		activeHumanoid = nil
 		activeRoot = nil
 		if characterCleanup then
@@ -119,7 +133,7 @@ function PlayerMovementController.Start()
 
 		humanoid.WalkSpeed = Config.WalkSpeed
 		local locomotion = LocomotionAnimator.new(humanoid, root, animator)
-		setMovementLocked(InteractionLock.IsLocked())
+		setMovementLocked(isMovementLocked())
 		local updateConnection = RunService.PreRender:Connect(function()
 			locomotion:Update(runToggle and runToggle:IsRunning() or false)
 		end)
@@ -136,7 +150,7 @@ function PlayerMovementController.Start()
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 then
 			cancelSpeedTween()
-			if InteractionLock.IsLocked() then
+			if isMovementLocked() then
 				humanoid.WalkSpeed = 0
 				return
 			end
@@ -159,7 +173,9 @@ function PlayerMovementController.Start()
 	end)
 	activeRunToggle = runToggle
 
-	local stopLockObserver = InteractionLock.Subscribe(setMovementLocked)
+	local stopLockObserver = InteractionLock.Subscribe(function()
+		setMovementLocked(isMovementLocked())
+	end)
 	local addedConnection = player.CharacterAdded:Connect(bindCharacter)
 	local removingConnection = player.CharacterRemoving:Connect(cleanupCharacter)
 	if player.Character then
@@ -180,7 +196,7 @@ function PlayerMovementController.Start()
 end
 
 function PlayerMovementController.IsRunning()
-	if InteractionLock.IsLocked() then
+	if isMovementLocked() then
 		return false
 	end
 	return activeRunToggle and activeRunToggle:IsRunning() or false

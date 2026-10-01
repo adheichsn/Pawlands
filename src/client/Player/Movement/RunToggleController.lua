@@ -22,7 +22,9 @@ function RunToggleController.new(changed)
 	}, RunToggleController)
 
 	self.Connection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or UserInputService:GetFocusedTextBox() or InteractionLock.IsLocked() then
+		if gameProcessed or UserInputService:GetFocusedTextBox()
+			or InteractionLock.IsLockedExcept("Inventory")
+		then
 			return
 		end
 		if not isToggleKey(input.KeyCode) then

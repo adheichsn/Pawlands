@@ -327,9 +327,9 @@ local function applyPageAndSearch()
 		end
 	end
 
-	-- Keep the Pets page visible even when every owned Pet is equipped. Equipped Pets
-	-- live in the authored top party strip and must never disappear because the
-	-- unequipped inventory grid is empty or filtered by Search.
+	-- Keep the Pets page visible even when Search filters every owned Pet. The top
+	-- strip summarizes the active party while the lower grid remains the complete
+	-- owned-Pet collection, including equipped Pets.
 	current.PetsPage.Visible = true
 	current.ItemsPage.Visible = false
 	current.NonePage.Visible = false
@@ -361,11 +361,17 @@ renderSnapshot = function()
 	local inventoryOrder = 0
 	for _, pet in ipairs(snapshot.Pets or {}) do
 		if type(pet) == "table" and type(pet.Uid) == "string"
-			and PetCatalog.Pets[pet.PetId] and not equipped[pet.Uid]
+			and PetCatalog.Pets[pet.PetId]
 		then
 			inventoryOrder += 1
 			local tile = current.PetTemplate:Clone()
-			configureTile(tile, pet, false, inventoryOrder, InventoryConfig.RuntimePetTilePrefix)
+			configureTile(
+				tile,
+				pet,
+				equipped[pet.Uid] == true,
+				inventoryOrder,
+				InventoryConfig.RuntimePetTilePrefix
+			)
 			tile.Parent = current.PetInventory
 		end
 	end
