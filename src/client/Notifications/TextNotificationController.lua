@@ -7,16 +7,8 @@ local connections = {}
 local refs = nil
 local activeByKey = {}
 local warnedMissing = false
-
-local TEMPLATE_NAMES = table.freeze({
-	AdminTile = true,
-	EventTile = true,
-	IndexTile = true,
-	LocationTile = true,
-	Main = true,
-	TextTile = true,
-	Title = true,
-})
+local isolatedFrame = nil
+local previewConnections = {}
 
 local TEXT_NAME_PRIORITY = table.freeze({
 	"Text",
@@ -31,6 +23,14 @@ local function disconnectAll()
 		connection:Disconnect()
 	end
 	table.clear(connections)
+end
+
+local function disconnectPreviewConnections()
+	for _, connection in ipairs(previewConnections) do
+		connection:Disconnect()
+	end
+	table.clear(previewConnections)
+	isolatedFrame = nil
 end
 
 local function isTextObject(instance)
@@ -55,12 +55,49 @@ local function findTextObject(root)
 	return nil
 end
 
-local function hideAuthoredTemplates(frame)
-	for _, child in ipairs(frame:GetChildren()) do
-		if TEMPLATE_NAMES[child.Name] and child:IsA("GuiObject") then
-			child.Visible = false
-		end
+local function isRuntimeTile(child)
+	return string.sub(child.Name, 1, 8) == "Runtime_"
+end
+
+local function isAuthoredTemplate(child)
+	return child.Parent ~= nil and child.Parent == isolatedFrame
+		and child:IsA("GuiObject")
+		and not isRuntimeTile(child)
+end
+
+local function forceTemplateHidden(child)
+	if isAuthoredTemplate(child) and child.Visible then
+		child.Visible = false
 	end
+end
+
+local function watchAuthoredTemplate(child)
+	if not isAuthoredTemplate(child) then
+		return
+	end
+	forceTemplateHidden(child)
+	table.insert(previewConnections, child:GetPropertyChangedSignal("Visible"):Connect(function()
+		if started then
+			forceTemplateHidden(child)
+		end
+	end))
+end
+
+local function bindPreviewIsolation(frame)
+	if isolatedFrame == frame then
+		for _, child in ipairs(frame:GetChildren()) do
+			forceTemplateHidden(child)
+		end
+		return
+	end
+	disconnectPreviewConnections()
+	isolatedFrame = frame
+	for _, child in ipairs(frame:GetChildren()) do
+		watchAuthoredTemplate(child)
+	end
+	table.insert(previewConnections, frame.ChildAdded:Connect(function(child)
+		watchAuthoredTemplate(child)
+	end))
 end
 
 local function resolveRefs()
@@ -78,7 +115,7 @@ local function resolveRefs()
 	if not templateText then
 		return nil
 	end
-	hideAuthoredTemplates(frame)
+	bindPreviewIsolation(frame)
 	return {
 		Gui = gui,
 		Frame = frame,
@@ -88,6 +125,7 @@ end
 
 local function ensureRefs()
 	if refs and refs.Gui.Parent and refs.Frame.Parent and refs.Template.Parent then
+		bindPreviewIsolation(refs.Frame)
 		return refs
 	end
 	refs = resolveRefs()
@@ -134,6 +172,11 @@ function TextNotificationController.ShowText(key, text)
 	if not started or type(key) ~= "string" or key == "" or type(text) ~= "string" or text == "" then
 		return false
 	end
+	local current = ensureRefs()
+	if not current then
+		return false
+	end
+	bindPreviewIsolation(current.Frame)
 	local record = activeByKey[key]
 	if not record or not record.Tile or not record.Tile.Parent then
 		destroyRecord(key)
@@ -194,6 +237,7 @@ function TextNotificationController.Stop()
 		destroyRecord(key)
 	end
 	refs = nil
+	disconnectPreviewConnections()
 end
 
 return TextNotificationController

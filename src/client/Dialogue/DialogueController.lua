@@ -29,17 +29,17 @@ local function findGuiRefs(playerGui)
 	if not gui or not gui:IsA("ScreenGui") then
 		return nil
 	end
-	local frame = gui:FindFirstChild(Config.FrameName)
-	local warningText = gui:FindFirstChild(Config.WarningTextName)
+	local frame = gui:FindFirstChild(Config.FrameName, true)
+	local warningText = gui:FindFirstChild(Config.WarningTextName, true)
 	if not frame or not frame:IsA("Frame") then
 		return nil
 	end
 
-	local username = frame:FindFirstChild(Config.UsernameName)
-	local dialogueText = frame:FindFirstChild(Config.DialogueTextName)
-	local option1 = frame:FindFirstChild(Config.Option1Name)
-	local option2 = frame:FindFirstChild(Config.Option2Name)
-	local typeSound = frame:FindFirstChild(Config.TypeSoundName)
+	local username = frame:FindFirstChild(Config.UsernameName, true)
+	local dialogueText = frame:FindFirstChild(Config.DialogueTextName, true)
+	local option1 = frame:FindFirstChild(Config.Option1Name, true)
+	local option2 = frame:FindFirstChild(Config.Option2Name, true)
+	local typeSound = frame:FindFirstChild(Config.TypeSoundName, true)
 	if not username or not username:IsA("TextLabel")
 		or not dialogueText or not dialogueText:IsA("TextLabel")
 		or not option1 or not option1:IsA("TextButton")
@@ -76,6 +76,7 @@ function DialogueController.Start()
 	local connections = {}
 	local guiConnections = {}
 	local refs
+	local warnedMissing = false
 	local activeSessionId
 	local currentChoices = {}
 	local typingToken = 0
@@ -411,7 +412,6 @@ function DialogueController.Start()
 		unbindGui()
 		refs = findGuiRefs(playerGui)
 		if not refs then
-			warn("[Pawlands Dialogue] Studio-owned DialogueGui hierarchy is missing required runtime anchors.")
 			return false
 		end
 		refs.Gui.Enabled = false
@@ -448,6 +448,24 @@ function DialogueController.Start()
 			task.defer(bindGui)
 		end
 	end))
+	table.insert(connections, playerGui.DescendantAdded:Connect(function(descendant)
+		if refs then
+			return
+		end
+		local dialogueGui = playerGui:FindFirstChild(Config.GuiName)
+		if dialogueGui and descendant:IsDescendantOf(dialogueGui) then
+			task.defer(bindGui)
+		end
+	end))
+	task.delay(3, function()
+		if not stopCurrent or refs then
+			return
+		end
+		if not bindGui() and not warnedMissing then
+			warnedMissing = true
+			warn("[Pawlands Dialogue] Studio-owned DialogueGui hierarchy is missing required runtime anchors after replication grace.")
+		end
+	end)
 	table.insert(connections, playerGui.ChildRemoved:Connect(function(child)
 		if refs and child == refs.Gui then
 			if activeSessionId ~= nil then

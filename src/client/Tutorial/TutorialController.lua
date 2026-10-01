@@ -43,7 +43,7 @@ local function findBestQuest(inside)
 	for _, item in ipairs(descendantsByName(inside, "Quest")) do
 		if item:IsA("Frame") then
 			local score = 0
-			for _, anchor in ipairs({ "Progress", "ItemName", "Prefix", "Header" }) do
+			for _, anchor in ipairs({ "Objective", "BarFrame", "Progress", "Option", "ItemName", "Prefix", "Header" }) do
 				if item:FindFirstChild(anchor, true) then
 					score += 1
 				end
@@ -59,7 +59,22 @@ end
 
 local function findText(root, name)
 	local item = root and root:FindFirstChild(name, true)
-	return item and item:IsA("TextLabel") and item or nil
+	return item and (item:IsA("TextLabel") or item:IsA("TextButton")) and item or nil
+end
+
+local function findFirstText(root)
+	if not root then
+		return nil
+	end
+	if root:IsA("TextLabel") or root:IsA("TextButton") then
+		return root
+	end
+	for _, item in ipairs(root:GetDescendants()) do
+		if item:IsA("TextLabel") or item:IsA("TextButton") then
+			return item
+		end
+	end
+	return nil
 end
 
 local function resolveRefs()
@@ -68,35 +83,55 @@ local function resolveRefs()
 	if not gui or not gui:IsA("ScreenGui") then
 		return nil
 	end
-	local list = gui:FindFirstChild("List")
-	local inside = list and list:FindFirstChild("Inside")
-	if not inside then
+
+	-- The current Studio tracker keeps Inside directly under its presentation tree,
+	-- while older authored versions used List > Inside. Resolve either layout.
+	local inside = gui:FindFirstChild("Inside", true)
+	if not inside or not inside:IsA("GuiObject") then
 		return nil
 	end
+
 	local quest = findBestQuest(inside)
 	if not quest then
 		return nil
 	end
+
 	local objective = quest:FindFirstChild("Objective", true)
 	local barFrame = objective and objective:FindFirstChild("BarFrame", true)
+	local bg = barFrame and barFrame:FindFirstChild("BG")
 	local bar = barFrame and barFrame:FindFirstChild("Bar")
 	local progress = findText(quest, "Progress")
 	local itemName = findText(quest, "ItemName")
 	local prefix = findText(quest, "Prefix")
 	local suffix = findText(quest, "Suffix")
 	local extra = findText(quest, "Extra")
+
 	local header = nil
 	local top = quest:FindFirstChild("Top")
 	local topFrame = top and top:FindFirstChild("TopFrame")
 	if topFrame then
-		header = topFrame:FindFirstChild("Header")
+		header = findText(topFrame, "Header") or findFirstText(topFrame)
 	end
-	if not header or not header:IsA("TextLabel") then
+	if not header then
 		header = findText(quest, "Header")
 	end
-	if not itemName or not prefix or not header then
+	if not header then
+		local option = quest:FindFirstChild("Option")
+		local optionContent = option and option:FindFirstChild("Content")
+		header = findFirstText(optionContent)
+	end
+
+	local objectiveLabel = nil
+	if objective then
+		local objectiveContent = objective:FindFirstChild("Content")
+		objectiveLabel = findFirstText(objectiveContent)
+	end
+
+	local hasSplitObjective = prefix ~= nil and itemName ~= nil
+	if not header or (not hasSplitObjective and not objectiveLabel) then
 		return nil
 	end
+
 	return {
 		Gui = gui,
 		Inside = inside,
@@ -104,11 +139,13 @@ local function resolveRefs()
 		Header = header,
 		Prefix = prefix,
 		ItemName = itemName,
+		ObjectiveLabel = objectiveLabel,
 		Suffix = suffix,
 		Progress = progress,
 		Extra = extra,
-		Bar = bar and bar:IsA("Frame") and bar or nil,
-		BarBaseSize = bar and bar:IsA("Frame") and bar.Size or nil,
+		Bar = bar and bar:IsA("GuiObject") and bar or nil,
+		BarFullWidth = bg and bg:IsA("GuiObject") and bg.Size.X
+			or (bar and bar:IsA("GuiObject") and UDim.new(1, 0) or nil),
 	}
 end
 
@@ -221,13 +258,31 @@ local function renderGuidance()
 	end
 end
 
+local function setObjectiveText(prefix, item)
+	if not refs then
+		return
+	end
+	if refs.Prefix and refs.ItemName then
+		refs.Prefix.Text = prefix
+		refs.ItemName.Text = item
+	elseif refs.ObjectiveLabel then
+		refs.ObjectiveLabel.Text = string.format("%s %s", prefix, item)
+	end
+end
+
 local function setBar(alpha)
-	if not refs or not refs.Bar or not refs.BarBaseSize then
+	if not refs or not refs.Bar or not refs.BarFullWidth then
 		return
 	end
 	alpha = math.clamp(alpha, 0, 1)
-	local base = refs.BarBaseSize
-	refs.Bar.Size = UDim2.new(base.X.Scale * alpha, math.floor(base.X.Offset * alpha), base.Y.Scale, base.Y.Offset)
+	local fullWidth = refs.BarFullWidth
+	local currentSize = refs.Bar.Size
+	refs.Bar.Size = UDim2.new(
+		fullWidth.Scale * alpha,
+		math.floor(fullWidth.Offset * alpha),
+		currentSize.Y.Scale,
+		currentSize.Y.Offset
+	)
 end
 
 local function renderTracker()
@@ -235,9 +290,6 @@ local function renderTracker()
 		refs = resolveRefs()
 		if refs then
 			prepareAuthoredTracker(refs)
-		elseif not warnedMissing then
-			warnedMissing = true
-			warn("[Pawlands Tutorial] Studio-owned QuestTracker hierarchy is missing required runtime anchors.")
 		end
 	end
 	if not refs then
@@ -258,15 +310,13 @@ local function renderTracker()
 
 	refs.Header.Text = TutorialConfig.QuestTitle
 	if stage == TutorialConfig.Stages.MeetAlex then
-		refs.Prefix.Text = TutorialConfig.MeetAlexPrefix
-		refs.ItemName.Text = TutorialConfig.MeetAlexItem
+		setObjectiveText(TutorialConfig.MeetAlexPrefix, TutorialConfig.MeetAlexItem)
 		if refs.Progress then
 			refs.Progress.Visible = false
 		end
 		setBar(0)
 	elseif stage == TutorialConfig.Stages.GoToZone then
-		refs.Prefix.Text = TutorialConfig.GoToZonePrefix
-		refs.ItemName.Text = TutorialConfig.GoToZoneItem
+		setObjectiveText(TutorialConfig.GoToZonePrefix, TutorialConfig.GoToZoneItem)
 		if refs.Progress then
 			refs.Progress.Visible = false
 		end
@@ -274,16 +324,14 @@ local function renderTracker()
 	elseif stage == TutorialConfig.Stages.InCombat then
 		local current = math.max(0, tonumber(player:GetAttribute(TutorialConfig.ProgressAttributeName)) or 0)
 		local goal = math.max(1, tonumber(player:GetAttribute(TutorialConfig.GoalAttributeName)) or 1)
-		refs.Prefix.Text = TutorialConfig.CombatPrefix
-		refs.ItemName.Text = TutorialConfig.CombatItem
+		setObjectiveText(TutorialConfig.CombatPrefix, TutorialConfig.CombatItem)
 		if refs.Progress then
 			refs.Progress.Text = string.format("%d / %d", math.min(current, goal), goal)
 			refs.Progress.Visible = true
 		end
 		setBar(current / goal)
 	elseif stage == TutorialConfig.Stages.ReturnToAlex then
-		refs.Prefix.Text = TutorialConfig.ReturnPrefix
-		refs.ItemName.Text = TutorialConfig.ReturnItem
+		setObjectiveText(TutorialConfig.ReturnPrefix, TutorialConfig.ReturnItem)
 		if refs.Progress then
 			refs.Progress.Visible = false
 		end
@@ -304,6 +352,15 @@ local function bindPlayerGui()
 			task.defer(render)
 		elseif child.Name == "TextNotifications" then
 			task.defer(renderGuidance)
+		end
+	end))
+	table.insert(connections, playerGui.DescendantAdded:Connect(function(descendant)
+		if refs then
+			return
+		end
+		local questGui = playerGui:FindFirstChild(TutorialConfig.QuestGuiName)
+		if questGui and descendant:IsDescendantOf(questGui) then
+			task.defer(renderTracker)
 		end
 	end))
 end
@@ -328,6 +385,19 @@ function TutorialController.Start()
 		renderGuidance()
 	end))
 	reportInputMode()
+	task.delay(3, function()
+		if not started or refs then
+			return
+		end
+		refs = resolveRefs()
+		if refs then
+			prepareAuthoredTracker(refs)
+			renderTracker()
+		elseif not warnedMissing then
+			warnedMissing = true
+			warn("[Pawlands Tutorial] Studio-owned QuestTracker hierarchy is missing required runtime anchors after replication grace.")
+		end
+	end)
 	heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
 		accumulator += dt
 		if accumulator >= 0.10 then
