@@ -53,6 +53,16 @@ function PetInventoryService.Owns(player, uid)
 	return state ~= nil and state.Pets[uid] ~= nil
 end
 
+function PetInventoryService.ToggleFavorite(player, uid)
+	local state = getState(player)
+	local pet = state and state.Pets[uid]
+	if not pet then
+		return nil, "Pet is not owned: " .. tostring(uid)
+	end
+	pet.Favorite = pet.Favorite ~= true
+	return clonePet(pet), nil
+end
+
 -- Session-only grant API. Persistence and hatch acquisition are intentionally not part of this patch.
 function PetInventoryService.Grant(player, requestedPet, variant)
 	if not validPlayer(player) then
@@ -74,6 +84,7 @@ function PetInventoryService.Grant(player, requestedPet, variant)
 		PetId = petId,
 		SpeciesId = definition.SpeciesId,
 		Variant = variant or "Normal",
+		Favorite = false,
 	}
 	state.Pets[uid] = pet
 	table.insert(state.Order, uid)

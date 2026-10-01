@@ -38,3 +38,7 @@ Authored notification preview tiles are hidden at runtime; only a cloned `TextTi
 - No auto-equip, Pet combat tutorial, Coins, EXP, loot, or general combat rewards are added.
 - Existing Player combat damage, Slime combat tuning, Pet combat logic, KO, and reward systems are unchanged.
 - Current Player basic attack input is still mouse-first. Studio-owned mobile/gamepad combat controls should be added in a later input stage before those platforms receive the same attack lesson.
+## Starter Pet Inventory handoff
+
+After starter grant, the player enters `EquipStarterPet`. The Pet Inventory runtime is server-backed and the exact starter UID must be equipped before tutorial progression advances to `PetCombatReady`. The next patch can layer the contextual Inventory-button / Pet-tile cue presentation on top of this server-confirmed state.
+

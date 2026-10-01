@@ -120,6 +120,7 @@ local function bindPlayer(player)
 		or stage == TutorialConfig.Stages.SoloComplete
 		or stage == TutorialConfig.Stages.ChooseStarterPet
 		or stage == TutorialConfig.Stages.EquipStarterPet
+		or stage == TutorialConfig.Stages.PetCombatReady
 		or stage == TutorialConfig.Stages.Completed
 end
 
@@ -557,6 +558,25 @@ function TutorialService.CompleteStarterPetChoice(player)
 		return false
 	end
 	setStage(player, TutorialConfig.Stages.EquipStarterPet)
+	setProgress(player, 0, 0)
+	return true
+end
+
+function TutorialService.CompleteStarterPetEquip(player, uid)
+	if not started or not player or player.Parent ~= Players then
+		return false
+	end
+	if stageOf(player) ~= TutorialConfig.Stages.EquipStarterPet then
+		return false
+	end
+	local starterUid = player:GetAttribute(TutorialConfig.StarterPetUidAttributeName)
+	if type(uid) ~= "string" or uid == "" or uid ~= starterUid then
+		return false
+	end
+	if player:GetAttribute(TutorialConfig.StarterPetGrantedAttributeName) ~= true then
+		return false
+	end
+	setStage(player, TutorialConfig.Stages.PetCombatReady)
 	setProgress(player, 0, 0)
 	return true
 end

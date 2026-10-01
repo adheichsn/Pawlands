@@ -22,6 +22,8 @@ local function tutorialStartNode(player)
 		return "StarterChoiceActive"
 	elseif stage == TutorialConfig.Stages.EquipStarterPet then
 		return "EquipStarterPetReminder"
+	elseif stage == TutorialConfig.Stages.PetCombatReady then
+		return "PetCombatReadyReminder"
 	elseif stage == TutorialConfig.Stages.Completed then
 		return "Completed"
 	end
@@ -99,6 +101,9 @@ local byId = {
 			},
 			EquipStarterPetReminder = {
 				Text = "Your new companion is waiting in your Inventory. Equip your Pet when you're ready.",
+			},
+			PetCombatReadyReminder = {
+				Text = "Great. Your companion is ready. We'll train together next.",
 			},
 			Completed = {
 				Text = "Good work. You're ready for the next step of your adventure.",

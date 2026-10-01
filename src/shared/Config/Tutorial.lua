@@ -17,6 +17,7 @@ return table.freeze({
 		SoloComplete = "SoloComplete",
 		ChooseStarterPet = "ChooseStarterPet",
 		EquipStarterPet = "EquipStarterPet",
+		PetCombatReady = "PetCombatReady",
 		Completed = "Completed",
 	}),
 
