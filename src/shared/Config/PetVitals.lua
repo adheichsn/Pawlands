@@ -7,7 +7,8 @@ local States = table.freeze({
 
 return table.freeze({
 	AttributeName = "PawlandsPetVitals",
-	DefaultMaxHealth = 100,
+	-- Safety only for malformed/missing catalog entries; normal Pets use PetCatalog.BaseMaxHealth.
+	FallbackMaxHealth = 100,
 	RecoverSeconds = 6,
 
 	-- Pawtopia-inspired out-of-combat reset, adapted into a visible smooth fill for

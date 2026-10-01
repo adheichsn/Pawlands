@@ -15,6 +15,7 @@ local heartbeatConnection
 local addedConnection
 local removingConnection
 local accumulator = 0
+local warnedMissingMaxHealth = {}
 
 local FIELD_SEPARATOR = ","
 local ENTRY_SEPARATOR = ";"
@@ -81,9 +82,22 @@ local function getPlayerState(player)
 end
 
 local function maxHealthForPet(pet)
-	local definition = pet and Catalog.Pets[pet.PetId]
-	local configured = definition and tonumber(definition.MaxHealth)
-	return math.max(1, configured or Config.DefaultMaxHealth)
+	local petId = pet and tostring(pet.PetId or "") or ""
+	local definition = petId ~= "" and Catalog.Pets[petId] or nil
+	local configured = definition and tonumber(definition.BaseMaxHealth)
+	if configured and configured > 0 then
+		return math.max(1, configured)
+	end
+
+	local warningKey = petId ~= "" and petId or "<unknown>"
+	if not warnedMissingMaxHealth[warningKey] then
+		warn(string.format(
+			"[Pawlands PetVitals] Missing valid BaseMaxHealth for %s; using safety fallback.",
+			warningKey
+		))
+		warnedMissingMaxHealth[warningKey] = true
+	end
+	return math.max(1, tonumber(Config.FallbackMaxHealth) or 1)
 end
 
 local function cloneVitals(vitals)
@@ -501,6 +515,7 @@ function PetVitalsService.Stop()
 	inventoryService = nil
 	partyService = nil
 	accumulator = 0
+	table.clear(warnedMissingMaxHealth)
 end
 
 return PetVitalsService

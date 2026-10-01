@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 
 local Pawlands = ReplicatedStorage:WaitForChild("Pawlands")
 local Shared = Pawlands:WaitForChild("Shared")
+local Catalog = require(Shared.Config.PetCatalog)
 local Config = require(Shared.Config.PetCombat)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local Codec = require(Shared.Pets.PetCombatCodec)
@@ -20,8 +21,10 @@ local addedConnection
 local removingConnection
 local partyService
 local vitalsService
+local inventoryService
 local stateByPlayer = {}
 local accumulator = 0
+local warnedMissingDamage = {}
 
 local COMBAT_STATES = table.freeze({
 	Notice = true,
@@ -68,6 +71,26 @@ end
 local function runtimeFolder()
 	local folder = Workspace:FindFirstChild(SlimeMovementConfig.RuntimeFolderName)
 	return folder and folder:IsA("Folder") and folder or nil
+end
+
+local function damageForPet(player, uid)
+	local pet = inventoryService and inventoryService.GetPet(player, uid)
+	local petId = pet and tostring(pet.PetId or "") or ""
+	local definition = petId ~= "" and Catalog.Pets[petId] or nil
+	local configured = definition and tonumber(definition.BaseDamage)
+	if configured and configured > 0 then
+		return math.max(1, math.floor(configured + 0.5))
+	end
+
+	local warningKey = petId ~= "" and petId or tostring(uid or "<unknown>")
+	if not warnedMissingDamage[warningKey] then
+		warn(string.format(
+			"[Pawlands PetCombat] Missing valid BaseDamage for %s; using safety fallback.",
+			warningKey
+		))
+		warnedMissingDamage[warningKey] = true
+	end
+	return math.max(1, math.floor((tonumber(Config.FallbackDamage) or 1) + 0.5))
 end
 
 local function isActiveTarget(model, player)
@@ -258,7 +281,7 @@ local function processImpact(player, petSlot, slimeSlot)
 	end
 	PetStrikeAuthority.CommitImpact(guard, slimePosition, clock)
 
-	local damage = math.max(1, math.floor((tonumber(Config.DefaultDamage) or 1) + 0.5))
+	local damage = damageForPet(player, entry.Uid)
 	local hitDirection = horizontalDirection(entry.Position, slimePosition)
 	local applied, health = SlimeHealth.ApplyDamage(entry.SlimeModel, damage, player, {
 		Tier = "Light",
@@ -420,14 +443,15 @@ function PetCombatService.GetCombatTargets(player)
 	return result
 end
 
-function PetCombatService.Start(petPartyService, petVitalsService)
+function PetCombatService.Start(petPartyService, petVitalsService, petInventoryService)
 	if started then
 		return
 	end
 	partyService = petPartyService
 	vitalsService = petVitalsService
-	if not partyService or not vitalsService then
-		error("PetCombatService requires PetPartyService and PetVitalsService.")
+	inventoryService = petInventoryService
+	if not partyService or not vitalsService or not inventoryService then
+		error("PetCombatService requires PetPartyService, PetVitalsService, and PetInventoryService.")
 	end
 	started = true
 	local impactRemote = ensureImpactRemote()
@@ -482,7 +506,9 @@ function PetCombatService.Stop()
 	table.clear(stateByPlayer)
 	partyService = nil
 	vitalsService = nil
+	inventoryService = nil
 	accumulator = 0
+	table.clear(warnedMissingDamage)
 end
 
 return PetCombatService

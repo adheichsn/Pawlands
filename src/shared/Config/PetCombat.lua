@@ -72,7 +72,8 @@ return table.freeze({
 	-- assignment validation, KO/leash checks, cadence, target resolution, and
 	-- damage, so a client cannot choose a victim or damage amount.
 	AttackImpactAlpha = 0.50,
-	DefaultDamage = 12,
+	-- Safety only for malformed/missing catalog entries; normal Pets use PetCatalog.BaseDamage.
+	FallbackDamage = 12,
 	ServerImpactCadenceToleranceSeconds = 0.18,
 	ServerImpactLeashPaddingStuds = 2.0,
 
