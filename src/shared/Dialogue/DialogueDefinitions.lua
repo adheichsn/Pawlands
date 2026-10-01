@@ -4,16 +4,24 @@ local Definitions = {}
 
 local function tutorialStartNode(player)
 	local stage = player and player:GetAttribute(TutorialConfig.StageAttributeName)
-	if stage == TutorialConfig.Stages.GoToZone then
+	if stage == TutorialConfig.Stages.LearnMove then
+		return "MovementReminder"
+	elseif stage == TutorialConfig.Stages.LearnSprint then
+		return "SprintReminder"
+	elseif stage == TutorialConfig.Stages.MeetAlex then
+		return "Welcome"
+	elseif stage == TutorialConfig.Stages.GoToZone then
 		return "GoToZoneReminder"
-	elseif stage == TutorialConfig.Stages.InCombat then
+	elseif stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
 		return "CombatReminder"
 	elseif stage == TutorialConfig.Stages.ReturnToAlex then
 		return "ReturnComplete"
+	elseif stage == TutorialConfig.Stages.SoloComplete then
+		return "SoloComplete"
 	elseif stage == TutorialConfig.Stages.Completed then
 		return "Completed"
 	end
-	return "Welcome"
+	return "MovementReminder"
 end
 
 local byId = {
@@ -22,6 +30,12 @@ local byId = {
 		StartNode = "Welcome",
 		ResolveStartNode = tutorialStartNode,
 		Nodes = {
+			MovementReminder = {
+				Text = "Get comfortable moving around first. Come back when you're ready.",
+			},
+			SprintReminder = {
+				Text = "Try picking up the pace first. You'll need to move quickly out there.",
+			},
 			Welcome = {
 				Text = "Hey there! Welcome to Stone Island.",
 				Next = "CombatIntro",
@@ -64,6 +78,9 @@ local byId = {
 						Close = true,
 					},
 				},
+			},
+			SoloComplete = {
+				Text = "Good work. Come back when you're ready for the next step.",
 			},
 			Completed = {
 				Text = "Good work. You're ready for the next step of your adventure.",

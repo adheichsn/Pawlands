@@ -4,6 +4,7 @@ local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerCombat)
+local TutorialConfig = require(Shared.Config.Tutorial)
 local CombatTargeting = require(script.Parent.CombatTargeting)
 local CombatContactRuntime = require(script.Parent.CombatContactRuntime)
 local CombatEffects = require(script.Parent.CombatEffects)
@@ -104,7 +105,13 @@ function PlayerCombatController.Start()
 			return false
 		end
 
-		local running = PlayerMovementController.IsRunning()
+		-- The first combat lesson explicitly teaches the normal M1 chain. Keep a
+		-- recently toggled Sprint from silently converting that teaching click into
+		-- RunningAttack; normal running attacks resume immediately after the lesson.
+		local learningBasicAttack = player:GetAttribute(TutorialConfig.StageAttributeName)
+			== TutorialConfig.Stages.LearnAttack
+		local running = not learningBasicAttack
+			and PlayerMovementController.IsRunning()
 			and humanoid.MoveDirection.Magnitude > 0.10
 			and horizontalSpeed(root) >= Config.RunningAttack.ClientMinimumHorizontalSpeedStuds
 		return comboRuntime:Request(running)

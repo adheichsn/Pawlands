@@ -16,6 +16,7 @@ function SlimeHealth.Initialize(model)
 	model:SetAttribute("PlayerHitSerial", 0)
 	model:SetAttribute("LastPlayerHitAt", 0)
 	model:SetAttribute("LastPlayerHitUserId", 0)
+	model:SetAttribute("LastPlayerHitActionType", "")
 	model:SetAttribute("LastHitSourceUid", "")
 	model:SetAttribute("LastHitDamage", 0)
 	model:SetAttribute("LastHitDirection", Vector3.zero)
@@ -53,9 +54,12 @@ function SlimeHealth.ApplyDamage(model, amount, player, feedback)
 	model:SetAttribute("LastHitUserId", player and player.UserId or 0)
 	model:SetAttribute("LastHitSourceType", sourceType)
 	if sourceType == "Player" then
-		model:SetAttribute("PlayerHitSerial", (model:GetAttribute("PlayerHitSerial") or 0) + 1)
+		-- Publish the complete confirmed Player-hit snapshot before incrementing the
+		-- serial. Tutorial observers treat PlayerHitSerial as the committed event.
 		model:SetAttribute("LastPlayerHitAt", time())
 		model:SetAttribute("LastPlayerHitUserId", player and player.UserId or 0)
+		model:SetAttribute("LastPlayerHitActionType", tostring(feedback and feedback.ActionType or ""))
+		model:SetAttribute("PlayerHitSerial", (model:GetAttribute("PlayerHitSerial") or 0) + 1)
 	end
 	model:SetAttribute("LastHitSourceUid", sourceUid)
 	model:SetAttribute("LastHitDamage", appliedDamage)

@@ -38,6 +38,8 @@ local petCombatFeedbackService = nil
 local playerEligibilityResolver = nil
 local respawnsEnabled = true
 local tutorialEncounterActive = false
+local tutorialSpawnedCount = 0
+local tutorialPlannedCount = 0
 
 local function getOrCreateRuntimeFolder()
 	local existing = Workspace:FindFirstChild(Config.RuntimeFolderName)
@@ -590,16 +592,23 @@ local function step(dt)
 	end
 end
 
-local function spawnAgents(requestedCount)
-	local maximumCount = math.min(Config.SpawnCount, #Catalog.Variants, #zone.Points)
-	local count = maximumCount
-	if requestedCount ~= nil then
-		count = math.clamp(math.floor(tonumber(requestedCount) or maximumCount), 1, maximumCount)
-	end
-	local spawnPositions = zone:GetInsetSpawnPositions(count, 0)
-	local authoredLoopCount = 0
+local function maximumSpawnCount()
+	return math.min(Config.SpawnCount, #Catalog.Variants, #zone.Points)
+end
 
-	for slot = 1, count do
+local function spawnAgentRange(startSlot, requestedCount, layoutCount)
+	local maximumCount = maximumSpawnCount()
+	startSlot = math.clamp(math.floor(tonumber(startSlot) or 1), 1, maximumCount)
+	local count = math.clamp(math.floor(tonumber(requestedCount) or 0), 0, maximumCount - startSlot + 1)
+	if count <= 0 then
+		return 0, 0
+	end
+	layoutCount = math.clamp(math.floor(tonumber(layoutCount) or (startSlot + count - 1)), 1, maximumCount)
+	local spawnPositions = zone:GetInsetSpawnPositions(layoutCount, 0)
+	local authoredLoopCount = 0
+	local spawnedCount = 0
+
+	for slot = startSlot, startSlot + count - 1 do
 		local definition = Catalog.Variants[slot]
 		local visual, reason = SlimeFactory.Create(definition, slot, runtimeFolder)
 		if not visual then
@@ -610,19 +619,36 @@ local function spawnAgents(requestedCount)
 			authoredLoopCount += 1
 		end
 
-		local spawnPosition = spawnPositions[slot]
-		local grounded = zone:GroundPoint(spawnPosition)
+		local spawnPosition = spawnPositions[slot] or spawnPositions[#spawnPositions]
+		local grounded = spawnPosition and zone:GroundPoint(spawnPosition)
 		if grounded then
 			spawnPosition = grounded
 		end
+		if not spawnPosition then
+			SlimeFactory.Destroy(visual)
+			warn(string.format("[Pawlands Slimes] Missing authored spawn position for slot %d.", slot))
+			continue
+		end
 		visual.Model:SetAttribute("RespawnGeneration", 0)
 		visual.Model:SetAttribute("RespawnPending", false)
+		visual.Model:SetAttribute("TutorialEncounter", tutorialEncounterActive)
+		visual.Model:SetAttribute("TutorialSpawnSlot", slot)
 		local agent = SlimeAgent.new(slot, definition, visual, spawnPosition, Config)
 		agent:EnterIdle(time(), randomObject)
 		agent:Step(agent.Position, 0, agents, zone, 0.001)
 		table.insert(agents, agent)
+		spawnedCount += 1
 	end
-	return authoredLoopCount, #agents
+	return authoredLoopCount, spawnedCount
+end
+
+local function spawnAgents(requestedCount)
+	local maximumCount = maximumSpawnCount()
+	local count = maximumCount
+	if requestedCount ~= nil then
+		count = math.clamp(math.floor(tonumber(requestedCount) or maximumCount), 1, maximumCount)
+	end
+	return spawnAgentRange(1, count, count)
 end
 
 function SlimeMovementService.Start(petCombat, petVitals, petCombatFeedback)
@@ -707,6 +733,8 @@ function SlimeMovementService.Stop()
 	playerEligibilityResolver = nil
 	respawnsEnabled = true
 	tutorialEncounterActive = false
+	tutorialSpawnedCount = 0
+	tutorialPlannedCount = 0
 	accumulator = 0
 end
 
@@ -721,25 +749,74 @@ function SlimeMovementService.ContainsPosition(position)
 	return running and zone ~= nil and typeof(position) == "Vector3" and zone:Contains(position) or false
 end
 
-function SlimeMovementService.BeginTutorialEncounter(requestedCount)
+function SlimeMovementService.BeginTutorialEncounter(requestedCount, plannedTotalCount)
 	if not running or not zone or not runtimeFolder then
 		return false, "Slime service is not ready."
 	end
 	if tutorialEncounterActive or #agents > 0 or #pendingRespawns > 0 then
 		return false, "Encounter is busy."
 	end
+	local maximumCount = maximumSpawnCount()
+	tutorialPlannedCount = math.clamp(
+		math.floor(tonumber(plannedTotalCount) or tonumber(requestedCount) or maximumCount),
+		1,
+		maximumCount
+	)
+	local initialCount = math.clamp(
+		math.floor(tonumber(requestedCount) or tutorialPlannedCount),
+		1,
+		tutorialPlannedCount
+	)
 	respawnsEnabled = false
 	tutorialEncounterActive = true
-	local authoredLoopCount, spawnedCount = spawnAgents(requestedCount)
+	tutorialSpawnedCount = 0
+	local authoredLoopCount, spawnedCount = spawnAgentRange(1, initialCount, tutorialPlannedCount)
+	tutorialSpawnedCount = spawnedCount
 	if spawnedCount <= 0 then
 		tutorialEncounterActive = false
+		tutorialSpawnedCount = 0
+		tutorialPlannedCount = 0
 		return false, "No tutorial Slimes could be spawned."
 	end
 	print(string.format(
-		"[Pawlands Slimes] Tutorial encounter started with %d slime(s) and %d authored animation loop(s).",
+		"[Pawlands Slimes] Tutorial encounter started with %d/%d slime(s) and %d authored animation loop(s).",
 		spawnedCount,
+		tutorialPlannedCount,
 		authoredLoopCount
 	))
+	return true, spawnedCount
+end
+
+function SlimeMovementService.AddTutorialSlimes(requestedCount)
+	if not running or not tutorialEncounterActive or not zone or not runtimeFolder then
+		return false, "Tutorial encounter is not active."
+	end
+	local remainingCapacity = math.max(0, tutorialPlannedCount - tutorialSpawnedCount)
+	local count = math.clamp(math.floor(tonumber(requestedCount) or remainingCapacity), 0, remainingCapacity)
+	if count <= 0 then
+		return true, 0
+	end
+	local startSlot = tutorialSpawnedCount + 1
+	local authoredLoopCount, spawnedCount = spawnAgentRange(startSlot, count, tutorialPlannedCount)
+	tutorialSpawnedCount += spawnedCount
+	if spawnedCount > 0 then
+		print(string.format(
+			"[Pawlands Slimes] Tutorial encounter expanded by %d slime(s) (%d/%d spawned, %d authored loop(s)).",
+			spawnedCount,
+			tutorialSpawnedCount,
+			tutorialPlannedCount,
+			authoredLoopCount
+		))
+	end
+	if spawnedCount < count then
+		warn(string.format(
+			"[Pawlands Slimes] Tutorial expansion requested %d slime(s) but only %d spawned.",
+			count,
+			spawnedCount
+		))
+	end
+	-- A partial authored spawn is still a usable encounter. TutorialService will
+	-- reduce the authoritative clear goal to the number that actually exists.
 	return true, spawnedCount
 end
 
@@ -762,6 +839,8 @@ function SlimeMovementService.CancelTutorialEncounter()
 	table.clear(formationStateByPlayer)
 	SlimeAttackScheduler.Reset()
 	tutorialEncounterActive = false
+	tutorialSpawnedCount = 0
+	tutorialPlannedCount = 0
 	respawnsEnabled = false
 end
 

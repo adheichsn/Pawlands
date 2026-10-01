@@ -519,6 +519,12 @@ function DialogueController.Start()
 				return
 			end
 			showNode(payload or {})
+		elseif operation == "ChoiceRejected" then
+			if sessionId ~= activeSessionId then
+				return
+			end
+			pendingChoice = false
+			showChoices(currentChoices)
 		elseif operation == "Close" then
 			if sessionId ~= activeSessionId then
 				return

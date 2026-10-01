@@ -90,7 +90,7 @@ local function resolveAction(state, actionType, comboIndex, now)
 	return definition, Config.GetComboImpactDelay(comboIndex), definition.DamageMultiplier
 end
 
-local function applyImpact(player, generation, aimDirection, preferredTarget, damageMultiplier, feedbackTier)
+local function applyImpact(player, generation, aimDirection, preferredTarget, damageMultiplier, feedbackTier, actionType)
 	if player:GetAttribute(DialogueConfig.ActiveAttributeName) == true then
 		return
 	end
@@ -135,6 +135,7 @@ local function applyImpact(player, generation, aimDirection, preferredTarget, da
 	local applied, health = SlimeHealth.ApplyDamage(target, damage, player, {
 		Tier = feedbackTier,
 		Direction = hitDirection,
+		ActionType = actionType,
 	})
 	if applied and RunService:IsStudio() then
 		print(string.format(
@@ -192,7 +193,7 @@ local function processAttack(player, actionType, comboIndex, aimDirection, prefe
 	end
 
 	task.delay(math.max(0, impactDelay), function()
-		applyImpact(player, generation, boundedAim, validPreferred, multiplier or 1, feedbackTier)
+		applyImpact(player, generation, boundedAim, validPreferred, multiplier or 1, feedbackTier, actionType)
 	end)
 end
 

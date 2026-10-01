@@ -11,6 +11,7 @@ return table.freeze({
 		LearnSprint = "LearnSprint",
 		MeetAlex = "MeetAlex",
 		GoToZone = "GoToZone",
+		LearnAttack = "LearnAttack",
 		InCombat = "InCombat",
 		ReturnToAlex = "ReturnToAlex",
 		SoloComplete = "SoloComplete",
@@ -34,7 +35,9 @@ return table.freeze({
 	MoveLessonDistanceStuds = 7,
 	SprintLessonMinSpeedStuds = 12.0,
 	SprintLessonRequiredSeconds = 0.35,
+	AttackLessonInitialSlimeCount = 1,
 	SoloCombatSlimeCount = 3,
+	RequiredAttackActionType = "M1",
 
 	QuestGuiName = "QuestTracker",
 	QuestTitle = "A New Adventure",
@@ -53,5 +56,7 @@ return table.freeze({
 	MoveHintTouch = "MOVE: Use the joystick to move",
 	SprintHintKeyboard = "SPRINT: Press Ctrl to toggle Sprint",
 	SprintHintGamepad = "SPRINT: Press L3 to toggle Sprint",
-	CombatHintKeyboard = "ATTACK: Click to attack the Slimes",
+	CombatHintKeyboard = "ATTACK: Click to attack the Slime",
+	CombatHintGamepad = "ATTACK: Press RT to attack the Slime",
+	CombatHintTouch = "ATTACK: Tap Attack to strike",
 })

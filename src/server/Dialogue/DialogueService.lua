@@ -212,6 +212,21 @@ local function openForPrompt(prompt, player)
 	sendCurrentNode(player, "Open")
 end
 
+local function resolveStartNodeForPlayer(player, session)
+	local definition = session and session.Definition
+	if not definition then
+		return nil
+	end
+	local nodeId = definition.StartNode
+	if type(definition.ResolveStartNode) == "function" then
+		local ok, resolved = pcall(definition.ResolveStartNode, player)
+		if ok and type(resolved) == "string" and resolved ~= "" then
+			nodeId = resolved
+		end
+	end
+	return nodeId and definition.Nodes[nodeId] and nodeId or nil
+end
+
 local function runAction(player, session, action)
 	if type(action) ~= "string" or action == "" then
 		return true
@@ -255,6 +270,13 @@ local function processChoice(player, sessionId, choiceId)
 		for _, choice in ipairs(node.Choices) do
 			if choice.Id == choiceId then
 				if not runAction(player, session, choice.Action) then
+					-- Never strand the client in pendingChoice. Re-resolve the current
+					-- stage-aware start node and send it back as a normal Node payload.
+					local resolvedNodeId = resolveStartNodeForPlayer(player, session)
+					if resolvedNodeId then
+						session.NodeId = resolvedNodeId
+					end
+					sendCurrentNode(player, "Node")
 					return
 				end
 				if choice.Close == true then

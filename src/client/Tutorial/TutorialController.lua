@@ -246,10 +246,14 @@ local function renderGuidance()
 		elseif inputMode == TutorialConfig.InputModes.Keyboard then
 			text = TutorialConfig.SprintHintKeyboard
 		end
-	elseif stage == TutorialConfig.Stages.InCombat
-		and inputMode == TutorialConfig.InputModes.Keyboard
-	then
-		text = TutorialConfig.CombatHintKeyboard
+	elseif stage == TutorialConfig.Stages.LearnAttack then
+		if inputMode == TutorialConfig.InputModes.Touch then
+			text = TutorialConfig.CombatHintTouch
+		elseif inputMode == TutorialConfig.InputModes.Gamepad then
+			text = TutorialConfig.CombatHintGamepad
+		else
+			text = TutorialConfig.CombatHintKeyboard
+		end
 	end
 	if text then
 		TextNotificationController.ShowText(TutorialConfig.NotificationKey, text)
@@ -300,6 +304,7 @@ local function renderTracker()
 	local visible = not dialogueActive() and (
 		stage == TutorialConfig.Stages.MeetAlex
 		or stage == TutorialConfig.Stages.GoToZone
+		or stage == TutorialConfig.Stages.LearnAttack
 		or stage == TutorialConfig.Stages.InCombat
 		or stage == TutorialConfig.Stages.ReturnToAlex
 	)
@@ -321,7 +326,7 @@ local function renderTracker()
 			refs.Progress.Visible = false
 		end
 		setBar(0)
-	elseif stage == TutorialConfig.Stages.InCombat then
+	elseif stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
 		local current = math.max(0, tonumber(player:GetAttribute(TutorialConfig.ProgressAttributeName)) or 0)
 		local goal = math.max(1, tonumber(player:GetAttribute(TutorialConfig.GoalAttributeName)) or 1)
 		setObjectiveText(TutorialConfig.CombatPrefix, TutorialConfig.CombatItem)
