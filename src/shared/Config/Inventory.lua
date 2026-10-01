@@ -19,6 +19,13 @@ return table.freeze({
 	EquippedPetsTextFormat = "Equipped Pets (%d/%d)",
 	DamageTextFormat = "%d DMG",
 
+	PartyMutationLockedAttributeName = "PawlandsPetPartyLocked",
+	PartyMutationExitGraceSeconds = 1.75,
+	PartyMutationPollIntervalSeconds = 0.10,
+	PartyMutationLockedReason = "Pet party can't be changed during combat.",
+	PartyMutationNotificationKey = "PetPartyCombatLock",
+	PartyMutationNotificationDurationSeconds = 2.4,
+
 	Actions = table.freeze({
 		Snapshot = "Snapshot",
 		ToggleEquip = "ToggleEquip",

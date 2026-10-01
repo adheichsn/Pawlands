@@ -21,6 +21,14 @@ Current behavior:
 - Items are not implemented yet; the authored Items tab resolves to the empty state.
 - Inventory/favorite state is session-only until persistence is introduced.
 
+Combat roster lock:
+- Inventory remains a per-player modal and never pauses or changes the server simulation for other players.
+- Search, Favorite mode, and Inventory viewing remain available while that player is in combat.
+- Equip, unequip, and other party mutations are rejected server-side while a live Slime is in `Notice`, `Chase`, `Engage`, or `Attack` against that player or one of that player's Pets.
+- The roster remains locked for a short 1.75-second grace after the last live engagement clears, preventing rapid combat/free/combat flicker during target transitions.
+- Rejected roster changes show the existing TextNotification message: `Pet party can't be changed during combat.`
+- The guard mirrors its current state to the Player attribute `PawlandsPetPartyLocked` for future UI/readability work; this patch does not redesign or disable Pet tiles.
+
 Tutorial handoff:
 - Equipping the exact starter Pet UID completes `EquipStarterPet` server-side.
 - Progress moves to `PetCombatReady`, reserved for the next guided Pet-combat stage.

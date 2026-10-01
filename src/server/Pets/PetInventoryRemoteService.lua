@@ -13,6 +13,7 @@ local requestInFlight = {}
 local inventoryService = nil
 local partyService = nil
 local tutorialService = nil
+local partyMutationGuard = nil
 
 local function ensureRemote()
 	local pawlands = ReplicatedStorage:WaitForChild("Pawlands")
@@ -59,11 +60,13 @@ local function snapshot(player, success, reason)
 	for _, pet in ipairs(inventoryService.GetInventory(player)) do
 		table.insert(pets, cleanPet(pet))
 	end
+	local mutationLocked = partyMutationGuard and partyMutationGuard.IsLocked(player) or false
 	return {
 		Success = success ~= false,
 		Reason = reason or "",
 		Pets = pets,
 		Party = partyService.GetParty(player),
+		PartyMutationLocked = mutationLocked,
 	}
 end
 
@@ -100,6 +103,12 @@ local function handleRequest(player, action, uid)
 	if requestInFlight[player] then
 		return snapshot(player, false, "Another Inventory action is already being processed.")
 	end
+	if action == InventoryConfig.Actions.ToggleEquip
+		and partyMutationGuard
+		and partyMutationGuard.IsLocked(player)
+	then
+		return snapshot(player, false, InventoryConfig.PartyMutationLockedReason)
+	end
 	requestInFlight[player] = true
 
 	local success, reason
@@ -125,17 +134,18 @@ local function handleRequest(player, action, uid)
 	return snapshot(player, success, reason)
 end
 
-function PetInventoryRemoteService.Start(petInventoryService, petPartyService, tutorialProgressionService)
+function PetInventoryRemoteService.Start(petInventoryService, petPartyService, tutorialProgressionService, petPartyMutationGuard)
 	if started then
 		return
 	end
-	if not petInventoryService or not petPartyService or not tutorialProgressionService then
-		error("PetInventoryRemoteService requires PetInventoryService, PetPartyService, and TutorialService.")
+	if not petInventoryService or not petPartyService or not tutorialProgressionService or not petPartyMutationGuard then
+		error("PetInventoryRemoteService requires PetInventoryService, PetPartyService, TutorialService, and PetPartyMutationGuard.")
 	end
 	started = true
 	inventoryService = petInventoryService
 	partyService = petPartyService
 	tutorialService = tutorialProgressionService
+	partyMutationGuard = petPartyMutationGuard
 	remote = ensureRemote()
 	remote.OnServerInvoke = handleRequest
 	playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
@@ -160,6 +170,7 @@ function PetInventoryRemoteService.Stop()
 	inventoryService = nil
 	partyService = nil
 	tutorialService = nil
+	partyMutationGuard = nil
 end
 
 return PetInventoryRemoteService

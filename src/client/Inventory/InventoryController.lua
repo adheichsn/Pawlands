@@ -6,6 +6,7 @@ local InventoryConfig = require(Shared.Config.Inventory)
 local PetCatalog = require(Shared.Config.PetCatalog)
 local PetPartyConfig = require(Shared.Config.PetParty)
 local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
+local TextNotificationController = require(script.Parent.Parent.Notifications.TextNotificationController)
 
 local InventoryController = {}
 
@@ -19,6 +20,7 @@ local currentPage = "Pets"
 local favoriteMode = false
 local busy = false
 local warnedMissing = false
+local partyLockNoticeSerial = 0
 
 local function disconnectAll()
 	for _, connection in ipairs(connections) do
@@ -192,6 +194,20 @@ end
 
 local renderSnapshot
 
+local function showPartyMutationLockedNotice()
+	partyLockNoticeSerial += 1
+	local serial = partyLockNoticeSerial
+	TextNotificationController.ShowText(
+		InventoryConfig.PartyMutationNotificationKey,
+		InventoryConfig.PartyMutationLockedReason
+	)
+	task.delay(InventoryConfig.PartyMutationNotificationDurationSeconds, function()
+		if started and serial == partyLockNoticeSerial then
+			TextNotificationController.Clear(InventoryConfig.PartyMutationNotificationKey)
+		end
+	end)
+end
+
 local function handleTileActivated(uid)
 	if busy then
 		return
@@ -201,7 +217,11 @@ local function handleTileActivated(uid)
 	local result = invoke(action, uid)
 	if result then
 		if result.Success ~= true and result.Reason ~= "" then
-			warn("[Pawlands Inventory] " .. tostring(result.Reason))
+			if result.PartyMutationLocked == true then
+				showPartyMutationLockedNotice()
+			else
+				warn("[Pawlands Inventory] " .. tostring(result.Reason))
+			end
 		end
 		snapshot = result
 		renderSnapshot()
@@ -510,6 +530,8 @@ function InventoryController.Stop()
 	favoriteMode = false
 	busy = false
 	warnedMissing = false
+	partyLockNoticeSerial += 1
+	TextNotificationController.Clear(InventoryConfig.PartyMutationNotificationKey)
 end
 
 return InventoryController
