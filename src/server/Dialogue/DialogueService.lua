@@ -20,6 +20,7 @@ local characterConnections = {}
 local sessions = {}
 local nextSessionId = 0
 local distanceAccumulator = 0
+local actionHandler = nil
 
 local function ensureRemote()
 	local pawlands = ReplicatedStorage:WaitForChild("Pawlands")
@@ -180,7 +181,17 @@ local function openForPrompt(prompt, player)
 		dialogueId = DialogueDefinitions.ResolveIdFromNpcName(npcModel.Name)
 	end
 	local definition = dialogueId and DialogueDefinitions.Get(dialogueId) or nil
-	if not definition or not definition.Nodes or not definition.Nodes[definition.StartNode] then
+	if not definition or not definition.Nodes then
+		return
+	end
+	local startNode = definition.StartNode
+	if type(definition.ResolveStartNode) == "function" then
+		local ok, resolved = pcall(definition.ResolveStartNode, player)
+		if ok and type(resolved) == "string" and resolved ~= "" then
+			startNode = resolved
+		end
+	end
+	if not startNode or not definition.Nodes[startNode] then
 		return
 	end
 	if not isSessionInRange(player, npcModel, prompt) then
@@ -192,13 +203,33 @@ local function openForPrompt(prompt, player)
 		Id = nextSessionId,
 		DialogueId = dialogueId,
 		Definition = definition,
-		NodeId = definition.StartNode,
+		NodeId = startNode,
 		NpcModel = npcModel,
 		Prompt = prompt,
 	}
 	sessions[player] = session
 	player:SetAttribute(Config.ActiveAttributeName, true)
 	sendCurrentNode(player, "Open")
+end
+
+local function runAction(player, session, action)
+	if type(action) ~= "string" or action == "" then
+		return true
+	end
+	if type(actionHandler) ~= "function" then
+		warn("[Pawlands Dialogue] No action handler registered for " .. action)
+		return false
+	end
+	local ok, result = pcall(actionHandler, player, action, {
+		DialogueId = session.DialogueId,
+		NodeId = session.NodeId,
+		NpcModel = session.NpcModel,
+	})
+	if not ok then
+		warn("[Pawlands Dialogue] Action failed: " .. tostring(result))
+		return false
+	end
+	return result ~= false
 end
 
 local function processChoice(player, sessionId, choiceId)
@@ -223,6 +254,9 @@ local function processChoice(player, sessionId, choiceId)
 	if type(node.Choices) == "table" then
 		for _, choice in ipairs(node.Choices) do
 			if choice.Id == choiceId then
+				if not runAction(player, session, choice.Action) then
+					return
+				end
 				if choice.Close == true then
 					closeSession(player, "Complete")
 					return
@@ -313,11 +347,12 @@ local function updateDistanceChecks(dt)
 	end
 end
 
-function DialogueService.Start()
+function DialogueService.Start(dialogueActionHandler)
 	if started then
 		return
 	end
 	started = true
+	actionHandler = dialogueActionHandler
 	remote = ensureRemote()
 
 	for _, player in ipairs(Players:GetPlayers()) do
@@ -364,6 +399,7 @@ function DialogueService.Stop()
 		heartbeatConnection = nil
 	end
 	remote = nil
+	actionHandler = nil
 	distanceAccumulator = 0
 end
 

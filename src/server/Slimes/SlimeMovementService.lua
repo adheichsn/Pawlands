@@ -35,6 +35,9 @@ local pendingRespawns = {}
 local petCombatService = nil
 local petVitalsService = nil
 local petCombatFeedbackService = nil
+local playerEligibilityResolver = nil
+local respawnsEnabled = true
+local tutorialEncounterActive = false
 
 local function getOrCreateRuntimeFolder()
 	local existing = Workspace:FindFirstChild(Config.RuntimeFolderName)
@@ -64,6 +67,12 @@ local function getRoot(player)
 end
 
 local function isTargetValid(agent, player, disengage)
+	if playerEligibilityResolver then
+		local ok, eligible = pcall(playerEligibilityResolver, player)
+		if not ok or eligible ~= true then
+			return false, nil
+		end
+	end
 	local root = getRoot(player)
 	if not root or not zone:Contains(root.Position) then
 		return false, nil
@@ -131,7 +140,7 @@ local function retireDefeatedAgents(now)
 				agent.Visual.Animation:SetMoving(false)
 			end
 
-			local lifecycle = SlimeLifecycle.Begin(agent, now, LifecycleConfig)
+			local lifecycle = SlimeLifecycle.Begin(agent, now, LifecycleConfig, respawnsEnabled)
 			agent:Destroy()
 			table.remove(agents, index)
 			table.insert(pendingRespawns, lifecycle)
@@ -169,6 +178,9 @@ local function processPendingRespawns(now)
 		if finished then
 			table.remove(pendingRespawns, index)
 		end
+	end
+	if tutorialEncounterActive and #agents == 0 and #pendingRespawns == 0 then
+		tutorialEncounterActive = false
 	end
 end
 
@@ -606,7 +618,7 @@ local function spawnAgents()
 		agent:Step(agent.Position, 0, agents, zone, 0.001)
 		table.insert(agents, agent)
 	end
-	return authoredLoopCount
+	return authoredLoopCount, #agents
 end
 
 function SlimeMovementService.Start(petCombat, petVitals, petCombatFeedback)
@@ -635,7 +647,11 @@ function SlimeMovementService.Start(petCombat, petVitals, petCombatFeedback)
 		return
 	end
 	zone = resolved
-	local authoredLoopCount = spawnAgents()
+	local authoredLoopCount = 0
+	local spawnedCount = 0
+	if Config.SpawnOnStart == true then
+		authoredLoopCount, spawnedCount = spawnAgents()
+	end
 
 	local interval = 1 / Config.UpdateRate
 	heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
@@ -645,11 +661,15 @@ function SlimeMovementService.Start(petCombat, petVitals, petCombatFeedback)
 			accumulator -= interval
 		end
 	end)
-	print(string.format(
-		"[Pawlands Slimes] Pet-first target ownership + Player retaliation takeover ready with %d slime(s), per-target pressure, and %d authored animation loop(s).",
-		#agents,
-		authoredLoopCount
-	))
+	if Config.SpawnOnStart == true then
+		print(string.format(
+			"[Pawlands Slimes] Combat runtime ready with %d slime(s) and %d authored animation loop(s).",
+			spawnedCount,
+			authoredLoopCount
+		))
+	else
+		print("[Pawlands Slimes] Combat runtime ready; waiting for tutorial encounter trigger.")
+	end
 end
 
 function SlimeMovementService.Stop()
@@ -680,7 +700,65 @@ function SlimeMovementService.Stop()
 	end
 	runtimeFolder, zone = nil, nil
 	petCombatService, petVitalsService, petCombatFeedbackService = nil, nil, nil
+	playerEligibilityResolver = nil
+	respawnsEnabled = true
+	tutorialEncounterActive = false
 	accumulator = 0
+end
+
+function SlimeMovementService.SetPlayerEligibilityResolver(resolver)
+	if resolver ~= nil and type(resolver) ~= "function" then
+		error("SetPlayerEligibilityResolver expects a function or nil.")
+	end
+	playerEligibilityResolver = resolver
+end
+
+function SlimeMovementService.ContainsPosition(position)
+	return running and zone ~= nil and typeof(position) == "Vector3" and zone:Contains(position) or false
+end
+
+function SlimeMovementService.BeginTutorialEncounter()
+	if not running or not zone or not runtimeFolder then
+		return false, "Slime service is not ready."
+	end
+	if tutorialEncounterActive or #agents > 0 or #pendingRespawns > 0 then
+		return false, "Encounter is busy."
+	end
+	respawnsEnabled = false
+	tutorialEncounterActive = true
+	local authoredLoopCount, spawnedCount = spawnAgents()
+	if spawnedCount <= 0 then
+		tutorialEncounterActive = false
+		return false, "No tutorial Slimes could be spawned."
+	end
+	print(string.format(
+		"[Pawlands Slimes] Tutorial encounter started with %d slime(s) and %d authored animation loop(s).",
+		spawnedCount,
+		authoredLoopCount
+	))
+	return true, spawnedCount
+end
+
+function SlimeMovementService.CancelTutorialEncounter()
+	if not running then
+		return
+	end
+	for _, agent in ipairs(agents) do
+		SlimeAttackScheduler.Withdraw(agent)
+		SlimeAttackRuntime.Cancel(agent, time(), CombatConfig)
+		SlimeTargeting.Clear(agent)
+		agent:Destroy()
+		SlimeFactory.Destroy(agent.Visual)
+	end
+	for _, lifecycle in ipairs(pendingRespawns) do
+		SlimeLifecycle.Cancel(lifecycle)
+	end
+	table.clear(agents)
+	table.clear(pendingRespawns)
+	table.clear(formationStateByPlayer)
+	SlimeAttackScheduler.Reset()
+	tutorialEncounterActive = false
+	respawnsEnabled = false
 end
 
 return SlimeMovementService

@@ -1,6 +1,7 @@
 return table.freeze({
 	Enabled = true,
 	RuntimeFolderName = "PawlandsSlimes",
+	SpawnOnStart = false,
 	SpawnCount = 4,
 
 	ZonePath = table.freeze({ "StarterStoneIsland", "Tutorial", "Zones", "CombatZone" }),

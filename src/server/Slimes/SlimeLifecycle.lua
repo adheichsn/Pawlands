@@ -78,7 +78,7 @@ local function resolveRespawnPosition(record, zone, agents, config)
 	return bestPosition
 end
 
-function SlimeLifecycle.Begin(agent, now, config)
+function SlimeLifecycle.Begin(agent, now, config, allowRespawn)
 	local generation = (agent.Model:GetAttribute("RespawnGeneration") or 0) + 1
 	local despawnAt = now + math.max(0, config.DefeatPresentationSeconds or 0)
 	local respawnAt = despawnAt + math.max(0, config.RespawnDelaySeconds or 0)
@@ -99,6 +99,7 @@ function SlimeLifecycle.Begin(agent, now, config)
 		DespawnAt = despawnAt,
 		RespawnAt = respawnAt,
 		Despawned = false,
+		AllowRespawn = allowRespawn ~= false,
 	}
 end
 
@@ -109,6 +110,10 @@ function SlimeLifecycle.Update(record, now, zone, agents, runtimeFolder, movemen
 			SlimeFactory.Destroy(record.Visual)
 			record.Visual = nil
 		end
+	end
+
+	if record.Despawned and record.AllowRespawn == false then
+		return nil, true
 	end
 
 	if not record.Despawned or now < record.RespawnAt then
