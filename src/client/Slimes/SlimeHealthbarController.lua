@@ -260,17 +260,22 @@ local function reportPendingFailure(model)
 		return
 	end
 
+	-- Runtime slime models may be visible to the client before attributes or the
+	-- authored RootPart have replicated/streamed in. Those are transient client
+	-- states, not malformed slime assets: keep the model pending and let the
+	-- existing attribute/DescendantAdded listeners retry when replication catches
+	-- up. The server-side SlimeFactory already rejects templates without RootPart.
 	if model:GetAttribute("SlimeId") == nil then
-		warnMissingOnce(model, "missing replicated SlimeId attribute")
 		return
 	end
 
 	local root = model:FindFirstChild(HealthbarConfig.RootPartName, true)
 	if not root or not root:IsA("BasePart") then
-		warnMissingOnce(model, "missing replicated RootPart")
 		return
 	end
 
+	-- Once the replicated model itself is bind-ready, configuration/template
+	-- failures are actionable and should still remain visible in Studio logs.
 	if not resolveTemplate() and not root:FindFirstChild(HealthbarConfig.GuiName) then
 		warnMissingOnce(model, "missing ReplicatedStorage > Assets > Misc > SlimeHealthbar template")
 	end
