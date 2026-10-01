@@ -576,8 +576,28 @@ local function stepAgent(agent, formationGoal, now, dt)
 	agent:Step(resolvedGoal, speed, agents, zone, dt, facingGoal)
 end
 
+local function pruneOrphanedAgents(now)
+	for index = #agents, 1, -1 do
+		local agent = agents[index]
+		local model = agent and agent.Model
+		if not model or model.Parent ~= runtimeFolder then
+			pcall(SlimeAttackScheduler.Withdraw, agent)
+			pcall(SlimeAttackRuntime.Cancel, agent, now, CombatConfig)
+			pcall(SlimeTargeting.Clear, agent)
+			if agent and agent.Visual and agent.Visual.Animation then
+				pcall(function()
+					agent.Visual.Animation:Destroy()
+				end)
+				agent.Visual.Animation = nil
+			end
+			table.remove(agents, index)
+		end
+	end
+end
+
 local function step(dt)
 	local now = time()
+	pruneOrphanedAgents(now)
 	if now >= filterRefreshAt then
 		filterRefreshAt = now + 1
 		zone:RefreshGroundFilter()
@@ -745,8 +765,36 @@ function SlimeMovementService.SetPlayerEligibilityResolver(resolver)
 	playerEligibilityResolver = resolver
 end
 
-function SlimeMovementService.ContainsPosition(position)
-	return running and zone ~= nil and typeof(position) == "Vector3" and zone:Contains(position) or false
+function SlimeMovementService.ContainsPosition(position, padding)
+	return running
+		and zone ~= nil
+		and typeof(position) == "Vector3"
+		and zone:Contains(position, padding)
+		or false
+end
+
+function SlimeMovementService.GetTutorialEncounterSnapshot()
+	local liveCount = 0
+	local trackedCount = 0
+	if runtimeFolder then
+		for _, agent in ipairs(agents) do
+			local model = agent.Model
+			if model and model.Parent == runtimeFolder then
+				trackedCount += 1
+				if SlimeHealth.IsAlive(model) then
+					liveCount += 1
+				end
+			end
+		end
+	end
+	return {
+		Active = tutorialEncounterActive,
+		LiveCount = liveCount,
+		TrackedCount = trackedCount,
+		PendingCount = #pendingRespawns,
+		SpawnedCount = tutorialSpawnedCount,
+		PlannedCount = tutorialPlannedCount,
+	}
 end
 
 function SlimeMovementService.BeginTutorialEncounter(requestedCount, plannedTotalCount)

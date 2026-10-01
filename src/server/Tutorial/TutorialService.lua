@@ -41,6 +41,9 @@ local function onboardingState(player)
 			MoveOrigin = nil,
 			SprintSeconds = 0,
 			InputMode = nil,
+			AttackLessonCompleted = false,
+			OutsideCombatSeconds = 0,
+			MissingCharacterSeconds = 0,
 		}
 		onboardingByPlayer[player] = state
 	end
@@ -51,6 +54,8 @@ local function resetOnboardingProgress(player)
 	local state = onboardingState(player)
 	state.MoveOrigin = nil
 	state.SprintSeconds = 0
+	state.OutsideCombatSeconds = 0
+	state.MissingCharacterSeconds = 0
 end
 
 local function setStage(player, stage)
@@ -108,6 +113,12 @@ local function bindPlayer(player)
 		player:SetAttribute(TutorialConfig.GoalAttributeName, 0)
 	end
 	player:SetAttribute(TutorialConfig.InputModeAttributeName, "")
+	local state = onboardingState(player)
+	local stage = stageOf(player)
+	state.AttackLessonCompleted = stage == TutorialConfig.Stages.InCombat
+		or stage == TutorialConfig.Stages.ReturnToAlex
+		or stage == TutorialConfig.Stages.SoloComplete
+		or stage == TutorialConfig.Stages.Completed
 end
 
 local function activeParticipants()
@@ -121,6 +132,40 @@ local function activeParticipants()
 	return count
 end
 
+local function clearWaveState(cancelRuntime)
+	waveActive = false
+	waveGoal = 0
+	waveDefeated = 0
+	waveSpawned = 0
+	waveExpanded = false
+	waveExpansionStarted = false
+	if cancelRuntime and slimeMovementService then
+		slimeMovementService.CancelTutorialEncounter()
+	end
+end
+
+local function prepareCombatRetry(player, previousStage)
+	local state = onboardingState(player)
+	if previousStage == TutorialConfig.Stages.InCombat then
+		state.AttackLessonCompleted = true
+	end
+	setProgress(player, 0, 0)
+	setStage(player, TutorialConfig.Stages.GoToZone)
+end
+
+local function resetActiveCombatForRecovery()
+	local recovered = false
+	for _, player in ipairs(Players:GetPlayers()) do
+		local stage = stageOf(player)
+		if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
+			prepareCombatRetry(player, stage)
+			recovered = true
+		end
+	end
+	clearWaveState(true)
+	return recovered
+end
+
 local function completeWave()
 	if not waveActive then
 		return
@@ -129,6 +174,7 @@ local function completeWave()
 	for _, player in ipairs(Players:GetPlayers()) do
 		local stage = stageOf(player)
 		if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
+			onboardingState(player).AttackLessonCompleted = true
 			setProgress(player, waveGoal, waveGoal)
 			setStage(player, TutorialConfig.Stages.ReturnToAlex)
 		end
@@ -186,6 +232,7 @@ local function onConfirmedPlayerHit(model)
 		return
 	end
 
+	onboardingState(player).AttackLessonCompleted = true
 	setStage(player, TutorialConfig.Stages.InCombat)
 	setProgress(player, waveDefeated, waveGoal)
 	expandCombatWave()
@@ -317,12 +364,17 @@ local function updateOnboarding(player, dt)
 	end
 end
 
-local function beginWave()
+local function beginWave(initialCount)
 	if waveActive then
 		return true
 	end
+	local requestedInitial = math.clamp(
+		math.floor(tonumber(initialCount) or TutorialConfig.AttackLessonInitialSlimeCount),
+		1,
+		TutorialConfig.SoloCombatSlimeCount
+	)
 	local ok, spawnedOrReason = slimeMovementService.BeginTutorialEncounter(
-		TutorialConfig.AttackLessonInitialSlimeCount,
+		requestedInitial,
 		TutorialConfig.SoloCombatSlimeCount
 	)
 	if not ok then
@@ -330,12 +382,80 @@ local function beginWave()
 	end
 	waveActive = true
 	waveSpawned = math.max(1, tonumber(spawnedOrReason) or 0)
-	waveGoal = TutorialConfig.SoloCombatSlimeCount
 	waveDefeated = 0
-	waveExpanded = waveSpawned >= waveGoal
+	waveExpanded = requestedInitial >= TutorialConfig.SoloCombatSlimeCount
+	waveGoal = waveExpanded and waveSpawned or TutorialConfig.SoloCombatSlimeCount
 	waveExpansionStarted = false
 	updateCombatProgress()
 	return true
+end
+
+local function updateCombatPresence(dt)
+	local resetAny = false
+	for _, player in ipairs(Players:GetPlayers()) do
+		local stage = stageOf(player)
+		if stage ~= TutorialConfig.Stages.LearnAttack and stage ~= TutorialConfig.Stages.InCombat then
+			continue
+		end
+
+		local state = onboardingState(player)
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+
+		if humanoid and humanoid.Health <= 0 then
+			prepareCombatRetry(player, stage)
+			resetAny = true
+			continue
+		end
+
+		if not root or not root:IsA("BasePart") then
+			state.MissingCharacterSeconds += dt
+			if state.MissingCharacterSeconds >= TutorialConfig.CombatMissingCharacterGraceSeconds then
+				prepareCombatRetry(player, stage)
+				resetAny = true
+			end
+			continue
+		end
+
+		state.MissingCharacterSeconds = 0
+		local exitPadding = -math.max(0, TutorialConfig.CombatExitLeewayStuds or 0)
+		if slimeMovementService.ContainsPosition(root.Position, exitPadding) then
+			state.OutsideCombatSeconds = 0
+		else
+			state.OutsideCombatSeconds += dt
+			if state.OutsideCombatSeconds >= TutorialConfig.CombatExitGraceSeconds then
+				prepareCombatRetry(player, stage)
+				resetAny = true
+			end
+		end
+	end
+
+	if resetAny and activeParticipants() <= 0 and waveActive then
+		clearWaveState(true)
+	end
+end
+
+local function reconcileWaveIntegrity()
+	if not waveActive or not slimeMovementService.GetTutorialEncounterSnapshot then
+		return
+	end
+	local snapshot = slimeMovementService.GetTutorialEncounterSnapshot()
+	if type(snapshot) ~= "table" then
+		return
+	end
+	local expectedLive = math.max(0, waveSpawned - waveDefeated)
+	local liveCount = math.max(0, tonumber(snapshot.LiveCount) or 0)
+	if snapshot.Active ~= true or liveCount ~= expectedLive then
+		local recovered = resetActiveCombatForRecovery()
+		if recovered and RunService:IsStudio() then
+			print(string.format(
+				"[Pawlands Tutorial] Recovered tutorial encounter integrity (%d expected live, %d found).",
+				expectedLive,
+				liveCount
+			))
+		end
+	end
 end
 
 local function updateZoneEntries()
@@ -343,12 +463,24 @@ local function updateZoneEntries()
 		if stageOf(player) == TutorialConfig.Stages.GoToZone then
 			local root = getAliveRoot(player)
 			if root and slimeMovementService.ContainsPosition(root.Position) then
-				local ok = beginWave()
+				local state = onboardingState(player)
+				local attackLessonCompleted = state.AttackLessonCompleted == true
+				local initialCount = attackLessonCompleted
+					and TutorialConfig.SoloCombatSlimeCount
+					or TutorialConfig.AttackLessonInitialSlimeCount
+				local ok = beginWave(initialCount)
 				if ok then
-					-- Every first-time participant gets the contextual attack lesson. The
-					-- shared encounter may already be expanded by another Player, but this
-					-- Player's hint stays until their own confirmed direct M1 lands.
-					setStage(player, TutorialConfig.Stages.LearnAttack)
+					if attackLessonCompleted then
+						setStage(player, TutorialConfig.Stages.InCombat)
+						if not waveExpanded then
+							expandCombatWave()
+						end
+					else
+						-- Every first-time participant gets the contextual attack lesson. The
+						-- shared encounter may already be expanded by another Player, but this
+						-- Player's hint stays until their own confirmed direct M1 lands.
+						setStage(player, TutorialConfig.Stages.LearnAttack)
+					end
 					setProgress(player, waveDefeated, waveGoal)
 				end
 			end
@@ -356,13 +488,7 @@ local function updateZoneEntries()
 	end
 
 	if waveActive and activeParticipants() <= 0 then
-		waveActive = false
-		waveGoal = 0
-		waveDefeated = 0
-		waveSpawned = 0
-		waveExpanded = false
-		waveExpansionStarted = false
-		slimeMovementService.CancelTutorialEncounter()
+		clearWaveState(true)
 	end
 end
 
@@ -391,6 +517,7 @@ function TutorialService.HandleDialogueAction(player, action)
 	local stage = stageOf(player)
 	if action == TutorialConfig.AcceptCombatAction then
 		if stage == TutorialConfig.Stages.MeetAlex then
+			onboardingState(player).AttackLessonCompleted = false
 			setProgress(player, 0, 0)
 			setStage(player, TutorialConfig.Stages.GoToZone)
 			return true
@@ -428,6 +555,11 @@ function TutorialService.Start(slimeService)
 	playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
 		player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, false)
 		onboardingByPlayer[player] = nil
+		task.defer(function()
+			if started and waveActive and activeParticipants() <= 0 then
+				clearWaveState(true)
+			end
+		end)
 	end)
 
 	slimeMovementService.SetPlayerEligibilityResolver(function(player)
@@ -445,6 +577,8 @@ function TutorialService.Start(slimeService)
 		for _, player in ipairs(Players:GetPlayers()) do
 			updateOnboarding(player, stepDt)
 		end
+		updateCombatPresence(stepDt)
+		reconcileWaveIntegrity()
 		updateZoneEntries()
 	end)
 end
@@ -479,18 +613,12 @@ function TutorialService.Stop()
 	end
 	if slimeMovementService then
 		slimeMovementService.SetPlayerEligibilityResolver(nil)
-		slimeMovementService.CancelTutorialEncounter()
+		clearWaveState(true)
 	end
 	for _, player in ipairs(Players:GetPlayers()) do
 		player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, false)
 	end
 	table.clear(onboardingByPlayer)
-	waveActive = false
-	waveGoal = 0
-	waveDefeated = 0
-	waveSpawned = 0
-	waveExpanded = false
-	waveExpansionStarted = false
 	accumulator = 0
 	inputRemote = nil
 	slimeMovementService = nil

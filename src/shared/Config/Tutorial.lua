@@ -38,6 +38,9 @@ return table.freeze({
 	AttackLessonInitialSlimeCount = 1,
 	SoloCombatSlimeCount = 3,
 	RequiredAttackActionType = "M1",
+	CombatExitLeewayStuds = 8,
+	CombatExitGraceSeconds = 0.60,
+	CombatMissingCharacterGraceSeconds = 0.75,
 
 	QuestGuiName = "QuestTracker",
 	QuestTitle = "A New Adventure",
