@@ -6,6 +6,8 @@ local Pawlands = ReplicatedStorage:WaitForChild("Pawlands")
 local Shared = Pawlands:WaitForChild("Shared")
 local TutorialConfig = require(Shared.Config.Tutorial)
 local DialogueConfig = require(Shared.Config.Dialogue)
+local PetCatalog = require(Shared.Config.PetCatalog)
+local PetRarityCatalog = require(Shared.Config.PetRarityCatalog)
 local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
 local TextNotificationController = require(script.Parent.Parent.Notifications.TextNotificationController)
 
@@ -52,6 +54,26 @@ local function findChooseButton(card)
 		end
 	end
 	return nil
+end
+
+local function setChooseCopy(button)
+	if not button then
+		return
+	end
+	local label = button:FindFirstChild("Label")
+	if label and (label:IsA("TextLabel") or label:IsA("TextButton")) then
+		label.Text = "CHOOSE"
+	elseif button:IsA("TextButton") then
+		button.Text = "CHOOSE"
+	end
+end
+
+local function rarityColorFor(species)
+	local pet = PetCatalog.Pets[species]
+	local rarityName = pet and pet.Rarity or PetRarityCatalog.FallbackRarity
+	local rarity = PetRarityCatalog.Rarities[rarityName]
+		or PetRarityCatalog.Rarities[PetRarityCatalog.FallbackRarity]
+	return rarity and rarity.Color or Color3.new(1, 1, 1)
 end
 
 local function restoreCardVisual(cardRef)
@@ -116,6 +138,7 @@ local function resolveRefs()
 		if not button or not stroke then
 			return nil
 		end
+		setChooseCopy(button)
 		cards[species] = {
 			Card = card,
 			Button = button,
@@ -171,8 +194,19 @@ local function showGrantNotification(species)
 	notificationGeneration += 1
 	local generation = notificationGeneration
 	local key = "StarterPetGrant"
-	TextNotificationController.ShowText(key, string.format("You got: %s!", species))
-	task.delay(TutorialConfig.StarterPetGrantNotificationSeconds, function()
+	local totalSeconds = TutorialConfig.StarterPetGrantNotificationSeconds
+	local indexSeconds = math.min(TutorialConfig.StarterPetIndexNotificationSeconds, totalSeconds)
+	local color = rarityColorFor(species)
+
+	-- Keep one notification row active at a time: authored IndexTile first,
+	-- then swap that same runtime key to the authored reward Tile.
+	TextNotificationController.ShowIndex(key, "Index:", "New species found!")
+	task.delay(indexSeconds, function()
+		if started and notificationGeneration == generation then
+			TextNotificationController.ShowReward(key, species, "x1", color)
+		end
+	end)
+	task.delay(totalSeconds, function()
 		if started and notificationGeneration == generation then
 			TextNotificationController.Clear(key)
 		end

@@ -41,6 +41,7 @@ return table.freeze({
 	StarterPetSelectionGuiName = "StarterPetSelection",
 	StarterPetSelectedStrokeColor = Color3.fromRGB(255, 215, 84),
 	StarterPetStrokeTweenSeconds = 0.14,
+	StarterPetIndexNotificationSeconds = 0.9,
 	StarterPetGrantNotificationSeconds = 2.5,
 	InputModes = table.freeze({
 		Keyboard = "Keyboard",
