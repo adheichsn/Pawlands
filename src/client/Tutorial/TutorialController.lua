@@ -307,6 +307,7 @@ local function renderTracker()
 		or stage == TutorialConfig.Stages.LearnAttack
 		or stage == TutorialConfig.Stages.InCombat
 		or stage == TutorialConfig.Stages.ReturnToAlex
+		or stage == TutorialConfig.Stages.EquipStarterPet
 	)
 	refs.Gui.Enabled = visible
 	if not visible then
@@ -341,6 +342,12 @@ local function renderTracker()
 			refs.Progress.Visible = false
 		end
 		setBar(1)
+	elseif stage == TutorialConfig.Stages.EquipStarterPet then
+		setObjectiveText(TutorialConfig.EquipStarterPrefix, TutorialConfig.EquipStarterItem)
+		if refs.Progress then
+			refs.Progress.Visible = false
+		end
+		setBar(0)
 	end
 end
 

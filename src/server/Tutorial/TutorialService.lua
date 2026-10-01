@@ -118,6 +118,8 @@ local function bindPlayer(player)
 	state.AttackLessonCompleted = stage == TutorialConfig.Stages.InCombat
 		or stage == TutorialConfig.Stages.ReturnToAlex
 		or stage == TutorialConfig.Stages.SoloComplete
+		or stage == TutorialConfig.Stages.ChooseStarterPet
+		or stage == TutorialConfig.Stages.EquipStarterPet
 		or stage == TutorialConfig.Stages.Completed
 end
 
@@ -532,8 +534,31 @@ function TutorialService.HandleDialogueAction(player, action)
 		setStage(player, TutorialConfig.Stages.SoloComplete)
 		setProgress(player, 0, 0)
 		return true
+	elseif action == TutorialConfig.BeginStarterPetChoiceAction then
+		if stage ~= TutorialConfig.Stages.SoloComplete then
+			return false
+		end
+		setStage(player, TutorialConfig.Stages.ChooseStarterPet)
+		setProgress(player, 0, 0)
+		return true
 	end
 	return false
+end
+
+function TutorialService.CanChooseStarterPet(player)
+	return started
+		and player ~= nil
+		and player.Parent == Players
+		and stageOf(player) == TutorialConfig.Stages.ChooseStarterPet
+end
+
+function TutorialService.CompleteStarterPetChoice(player)
+	if not TutorialService.CanChooseStarterPet(player) then
+		return false
+	end
+	setStage(player, TutorialConfig.Stages.EquipStarterPet)
+	setProgress(player, 0, 0)
+	return true
 end
 
 function TutorialService.Start(slimeService)

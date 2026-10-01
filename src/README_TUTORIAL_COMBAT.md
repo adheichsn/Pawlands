@@ -1,4 +1,4 @@
-# Pawlands First-Time Onboarding & Solo Combat — 3A.3
+# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5
 
 This stage extends the Studio-owned tutorial flow with contextual movement guidance, a longer Alex introduction, and a first combat lesson that intentionally happens before the Player receives a starter Pet.
 
@@ -9,6 +9,7 @@ No GUI hierarchy is created at runtime.
 - `StarterGui > TextNotifications > Frame > TextTile` is treated as the authored generic text-notification template. Runtime clones the complete `TextTile` template for tutorial guidance.
 - `StarterGui > QuestTracker` continues to own persistent tutorial objectives.
 - `StarterGui > DialogueGui` continues to own Alex dialogue presentation.
+- `StarterGui > StarterPetSelection` owns the Bunny / Cat / Dog starter choice. Runtime only binds the authored `DogCard`, `CatCard`, and `BunnyCard`; it does not create GUI hierarchy.
 
 Authored notification preview tiles are hidden at runtime; only a cloned `TextTile` is used by this stage.
 
@@ -24,10 +25,16 @@ Authored notification preview tiles are hidden at runtime; only a cloned `TextTi
 8. Entering the authored CombatZone starts a three-Slime player-only training wave.
 9. Studio automatic Pet preview is disabled so QA matches the live zero-Pet onboarding baseline. Pet dev commands remain available for explicit testing.
 10. Clearing the wave changes the objective to `Return to Alex`.
-11. Alex closes the solo lesson and the tutorial stops at `SoloComplete`, leaving starter-Pet grant / Pet combat training for the next stage.
+11. Alex closes the solo lesson at `SoloComplete`, then introduces the first companion choice.
+12. The tutorial advances to `ChooseStarterPet` and opens the Studio-owned starter selection after dialogue closes.
+13. Bunny, Cat, and Dog are the only valid starter choices. The server grants exactly one starter Pet for the session and never auto-equips it.
+14. The chosen card uses its authored outer `UIStroke` as the selection feedback; no selection overlay is created by code.
+15. A successful grant advances to `EquipStarterPet`, shows `You got: <Pet>!`, and changes the QuestTracker objective to `Equip your first Pet`. Actual Inventory equip guidance is reserved for 3A.5.1.
 
 ## Scope boundaries
 
-- No Pet rarity, Pet base stats, starter-Pet grant, persistence, Coins, EXP, loot, or general combat rewards are added.
+- Pet rarity/base stats are consumed from the existing 3B.1 catalog; this stage does not change those values.
+- Starter ownership is session-only because persistent Inventory/Profile storage is not part of the current Pawlands foundation.
+- No auto-equip, Pet combat tutorial, Coins, EXP, loot, or general combat rewards are added.
 - Existing Player combat damage, Slime combat tuning, Pet combat logic, KO, and reward systems are unchanged.
 - Current Player basic attack input is still mouse-first. Studio-owned mobile/gamepad combat controls should be added in a later input stage before those platforms receive the same attack lesson.

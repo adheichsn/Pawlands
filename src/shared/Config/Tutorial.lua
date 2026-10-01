@@ -15,6 +15,8 @@ return table.freeze({
 		InCombat = "InCombat",
 		ReturnToAlex = "ReturnToAlex",
 		SoloComplete = "SoloComplete",
+		ChooseStarterPet = "ChooseStarterPet",
+		EquipStarterPet = "EquipStarterPet",
 		Completed = "Completed",
 	}),
 
@@ -22,9 +24,24 @@ return table.freeze({
 	CompleteSoloCombatAction = "CompleteSoloTutorialCombat",
 	-- Kept as a compatibility alias for the previous 3A.2 action name.
 	CompleteCombatAction = "CompleteTutorialCombat",
+	BeginStarterPetChoiceAction = "BeginStarterPetChoice",
 
 	RemoteFolderName = "Remotes",
 	InputModeRemoteName = "TutorialInputMode",
+	StarterPetChoiceRemoteName = "StarterPetChoice",
+
+	StarterPetGrantedAttributeName = "PawlandsStarterPetGranted",
+	StarterPetUidAttributeName = "PawlandsStarterPetUid",
+	StarterPetSpeciesAttributeName = "PawlandsStarterPetSpecies",
+	StarterPetChoices = table.freeze({
+		Bunny = "BunnyCard",
+		Cat = "CatCard",
+		Dog = "DogCard",
+	}),
+	StarterPetSelectionGuiName = "StarterPetSelection",
+	StarterPetSelectedStrokeColor = Color3.fromRGB(255, 215, 84),
+	StarterPetStrokeTweenSeconds = 0.14,
+	StarterPetGrantNotificationSeconds = 2.5,
 	InputModes = table.freeze({
 		Keyboard = "Keyboard",
 		Gamepad = "Gamepad",
@@ -52,6 +69,8 @@ return table.freeze({
 	CombatItem = "Training Slimes",
 	ReturnPrefix = "Return to",
 	ReturnItem = "Alex",
+	EquipStarterPrefix = "Equip your first",
+	EquipStarterItem = "Pet",
 
 	Cue = table.freeze({
 		GuiName = "TutorialCues",

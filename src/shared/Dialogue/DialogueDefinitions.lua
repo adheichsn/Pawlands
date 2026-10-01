@@ -17,7 +17,11 @@ local function tutorialStartNode(player)
 	elseif stage == TutorialConfig.Stages.ReturnToAlex then
 		return "ReturnComplete"
 	elseif stage == TutorialConfig.Stages.SoloComplete then
-		return "SoloComplete"
+		return "StarterIntro"
+	elseif stage == TutorialConfig.Stages.ChooseStarterPet then
+		return "StarterChoiceActive"
+	elseif stage == TutorialConfig.Stages.EquipStarterPet then
+		return "EquipStarterPetReminder"
 	elseif stage == TutorialConfig.Stages.Completed then
 		return "Completed"
 	end
@@ -75,12 +79,26 @@ local byId = {
 						Id = "FinishTraining",
 						Text = "Continue",
 						Action = TutorialConfig.CompleteCombatAction,
+						Next = "StarterIntro",
+					},
+				},
+			},
+			StarterIntro = {
+				Text = "You've proven you can handle yourself. Now choose a companion to fight by your side.",
+				Choices = {
+					{
+						Id = "ChooseStarterPet",
+						Text = "Choose a Pet",
+						Action = TutorialConfig.BeginStarterPetChoiceAction,
 						Close = true,
 					},
 				},
 			},
-			SoloComplete = {
-				Text = "Good work. Come back when you're ready for the next step.",
+			StarterChoiceActive = {
+				Text = "Choose the companion you want to begin your journey with.",
+			},
+			EquipStarterPetReminder = {
+				Text = "Your new companion is waiting in your Inventory. Equip your Pet when you're ready.",
 			},
 			Completed = {
 				Text = "Good work. You're ready for the next step of your adventure.",
