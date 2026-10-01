@@ -38,6 +38,10 @@ local function isTextObject(instance)
 	return instance and (instance:IsA("TextLabel") or instance:IsA("TextButton"))
 end
 
+local function isImageObject(instance)
+	return instance and (instance:IsA("ImageLabel") or instance:IsA("ImageButton"))
+end
+
 local function findTextObject(root)
 	if isTextObject(root) then
 		return root
@@ -164,15 +168,22 @@ local function resolveRewardAnchors(tile)
 	local header = textFrame and textFrame:FindFirstChild("Header")
 	local label = textFrame and textFrame:FindFirstChild("Label")
 	local vectorFrame = textFrame and textFrame:FindFirstChild("VectorFrame")
+	local vector = vectorFrame and vectorFrame:FindFirstChild("Vector")
 	local quantity = vectorFrame and vectorFrame:FindFirstChild("Quantity")
 	local labelStroke = label and label:FindFirstChildOfClass("UIStroke")
 	local labelGradient = label and label:FindFirstChildOfClass("UIGradient")
-	if not isTextObject(header) or not isTextObject(label) or not isTextObject(quantity) or not labelStroke then
+	if not isTextObject(header)
+		or not isTextObject(label)
+		or not isImageObject(vector)
+		or not isTextObject(quantity)
+		or not labelStroke
+	then
 		return nil
 	end
 	return {
 		Header = header,
 		Label = label,
+		Vector = vector,
 		Quantity = quantity,
 		LabelStroke = labelStroke,
 		LabelGradient = labelGradient,
@@ -239,6 +250,7 @@ local function createRecord(key, kind, payload)
 		end
 		anchors.Header.Text = payload.Header
 		anchors.Label.Text = payload.Name
+		anchors.Vector.Image = payload.Icon
 		anchors.Quantity.Text = payload.Quantity
 		applyRewardNameColor(anchors, payload.Color)
 	else
@@ -295,13 +307,21 @@ function TextNotificationController.ShowIndex(key, header, label)
 	return replaceRecord(key, "Index", payload)
 end
 
-function TextNotificationController.ShowReward(key, name, quantity, rarityColor)
-	if not started or type(key) ~= "string" or key == "" or type(name) ~= "string" or name == "" then
+function TextNotificationController.ShowReward(key, name, quantity, rarityColor, icon)
+	if not started
+		or type(key) ~= "string"
+		or key == ""
+		or type(name) ~= "string"
+		or name == ""
+		or type(icon) ~= "string"
+		or icon == ""
+	then
 		return false
 	end
 	local payload = {
 		Header = "You got:",
 		Name = name,
+		Icon = icon,
 		Quantity = type(quantity) == "string" and quantity ~= "" and quantity or "x1",
 		Color = rarityColor,
 	}
@@ -346,7 +366,7 @@ function TextNotificationController.Start()
 			local rewardReady = ready.RewardTemplate and resolveRewardAnchors(ready.RewardTemplate) ~= nil
 			if not indexReady or not rewardReady then
 				warnedSpecializedMissing = true
-				warn("[Pawlands Notifications] IndexTile or Tile is missing authored Header/Label/Quantity/UIStroke anchors required by starter Pet acquisition feedback.")
+				warn("[Pawlands Notifications] IndexTile or Tile is missing authored Header/Label/Vector/Quantity/UIStroke anchors required by starter Pet acquisition feedback.")
 			end
 		end
 	end)

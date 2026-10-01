@@ -68,12 +68,12 @@ local function setChooseCopy(button)
 	end
 end
 
-local function rarityColorFor(species)
+local function petPresentationFor(species)
 	local pet = PetCatalog.Pets[species]
 	local rarityName = pet and pet.Rarity or PetRarityCatalog.FallbackRarity
 	local rarity = PetRarityCatalog.Rarities[rarityName]
 		or PetRarityCatalog.Rarities[PetRarityCatalog.FallbackRarity]
-	return rarity and rarity.Color or Color3.new(1, 1, 1)
+	return rarity and rarity.Color or Color3.new(1, 1, 1), pet and pet.Icon or nil
 end
 
 local function restoreCardVisual(cardRef)
@@ -190,25 +190,28 @@ local function render()
 	end
 end
 
+local function clearGrantNotification()
+	TextNotificationController.Clear("StarterPetGrantIndex")
+	TextNotificationController.Clear("StarterPetGrantReward")
+end
+
 local function showGrantNotification(species)
 	notificationGeneration += 1
 	local generation = notificationGeneration
-	local key = "StarterPetGrant"
 	local totalSeconds = TutorialConfig.StarterPetGrantNotificationSeconds
-	local indexSeconds = math.min(TutorialConfig.StarterPetIndexNotificationSeconds, totalSeconds)
-	local color = rarityColorFor(species)
+	local rewardDelaySeconds = math.min(TutorialConfig.StarterPetRewardDelaySeconds, totalSeconds)
+	local color, icon = petPresentationFor(species)
 
-	-- Keep one notification row active at a time: authored IndexTile first,
-	-- then swap that same runtime key to the authored reward Tile.
-	TextNotificationController.ShowIndex(key, "Index:", "New species found!")
-	task.delay(indexSeconds, function()
-		if started and notificationGeneration == generation then
-			TextNotificationController.ShowReward(key, species, "x1", color)
+	clearGrantNotification()
+	TextNotificationController.ShowIndex("StarterPetGrantIndex", "Index:", "New species found!")
+	task.delay(rewardDelaySeconds, function()
+		if started and notificationGeneration == generation and icon then
+			TextNotificationController.ShowReward("StarterPetGrantReward", species, "x1", color, icon)
 		end
 	end)
 	task.delay(totalSeconds, function()
 		if started and notificationGeneration == generation then
-			TextNotificationController.Clear(key)
+			clearGrantNotification()
 		end
 	end)
 end
@@ -271,7 +274,7 @@ function StarterPetSelectionController.Stop()
 	disconnect(connections)
 	disconnect(uiConnections)
 	InteractionLock.Set("StarterPetSelection", false)
-	TextNotificationController.Clear("StarterPetGrant")
+	clearGrantNotification()
 	if refs and refs.Gui and refs.Gui.Parent then
 		refs.Gui.Enabled = false
 	end
