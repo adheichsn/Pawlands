@@ -1,10 +1,12 @@
 local Players = game:GetService("Players")
+local ProximityPromptService = game:GetService("ProximityPromptService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.Dialogue)
+local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
 
 local DialogueController = {}
 local stopCurrent
@@ -82,12 +84,119 @@ function DialogueController.Start()
 	local activeTween
 	local warningToken = 0
 	local transitionToken = 0
+	local promptServiceWasEnabled
+	local promptServiceLocked = false
+	local fallbackPrompt
+	local fallbackPromptWasEnabled
+	local facingTween
+	local facingHumanoid
+	local facingAutoRotate
 
 	local function cancelTween()
 		transitionToken += 1
 		if activeTween then
 			activeTween:Cancel()
 			activeTween = nil
+		end
+	end
+
+	local function cancelFacingTween()
+		if facingTween then
+			facingTween:Cancel()
+			facingTween = nil
+		end
+	end
+
+	local function restoreFacing()
+		cancelFacingTween()
+		if facingHumanoid and facingHumanoid.Parent and facingAutoRotate ~= nil then
+			facingHumanoid.AutoRotate = facingAutoRotate
+		end
+		facingHumanoid = nil
+		facingAutoRotate = nil
+	end
+
+	local function faceNpc(npcPosition)
+		restoreFacing()
+		if typeof(npcPosition) ~= "Vector3" then
+			return
+		end
+		local character = player.Character
+		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+		local root = character and character:FindFirstChild("HumanoidRootPart")
+		if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
+			return
+		end
+
+		local delta = Vector3.new(npcPosition.X - root.Position.X, 0, npcPosition.Z - root.Position.Z)
+		if delta.Magnitude <= 0.001 then
+			return
+		end
+		facingHumanoid = humanoid
+		facingAutoRotate = humanoid.AutoRotate
+		humanoid.AutoRotate = false
+
+		local target = CFrame.lookAt(root.Position, root.Position + delta.Unit, Vector3.yAxis)
+		if Config.FaceNpcTweenSeconds <= 0 then
+			root.CFrame = target
+			return
+		end
+		facingTween = TweenService:Create(
+			root,
+			TweenInfo.new(Config.FaceNpcTweenSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ CFrame = target }
+		)
+		facingTween:Play()
+	end
+
+	local function restorePromptPresentation()
+		if promptServiceLocked then
+			pcall(function()
+				ProximityPromptService.Enabled = promptServiceWasEnabled ~= false
+			end)
+			promptServiceLocked = false
+			promptServiceWasEnabled = nil
+		end
+		if fallbackPrompt and fallbackPrompt.Parent and fallbackPromptWasEnabled ~= nil then
+			fallbackPrompt.Enabled = fallbackPromptWasEnabled
+		end
+		fallbackPrompt = nil
+		fallbackPromptWasEnabled = nil
+	end
+
+	local function hidePromptPresentation(prompt)
+		restorePromptPresentation()
+		local ok, current = pcall(function()
+			return ProximityPromptService.Enabled
+		end)
+		if ok then
+			local writeOk = pcall(function()
+				ProximityPromptService.Enabled = false
+			end)
+			if writeOk then
+				promptServiceWasEnabled = current
+				promptServiceLocked = true
+				return
+			end
+		end
+		if prompt and prompt:IsA("ProximityPrompt") then
+			fallbackPrompt = prompt
+			fallbackPromptWasEnabled = prompt.Enabled
+			prompt.Enabled = false
+		end
+	end
+
+	local function engageInteraction(payload)
+		InteractionLock.Set("Dialogue", true)
+		hidePromptPresentation(payload and payload.Prompt or nil)
+		faceNpc(payload and payload.NpcPosition or nil)
+	end
+
+	local function releaseInteraction(restorePromptNow)
+		InteractionLock.Set("Dialogue", false)
+		restoreFacing()
+		if restorePromptNow then
+			restorePromptPresentation()
 		end
 	end
 
@@ -198,6 +307,7 @@ function DialogueController.Start()
 		hideChoices()
 		pendingChoice = false
 		if not refs then
+			restorePromptPresentation()
 			return
 		end
 		cancelTween()
@@ -213,14 +323,16 @@ function DialogueController.Start()
 			if playbackState ~= Enum.PlaybackState.Completed or transitionToken ~= token or refs ~= currentRefs then
 				return
 			end
+			activeTween = nil
 			currentRefs.Frame.Visible = false
+			restorePromptPresentation()
 			if showWarning and currentRefs.WarningText then
 				warningToken += 1
-				local token = warningToken
+				local warningSequence = warningToken
 				currentRefs.WarningText.Text = Config.WalkedAwayWarningText
 				currentRefs.WarningText.Visible = true
 				task.delay(Config.WarningVisibleSeconds, function()
-					if refs ~= currentRefs or warningToken ~= token then
+					if refs ~= currentRefs or warningToken ~= warningSequence then
 						return
 					end
 					currentRefs.WarningText.Visible = false
@@ -271,6 +383,23 @@ function DialogueController.Start()
 		runTypewriter(payload.Text, payload.Choices)
 	end
 
+	local function choose(index)
+		if pendingChoice or activeSessionId == nil then
+			return
+		end
+		if typing then
+			finishTypewriter()
+			return
+		end
+		local choice = currentChoices[index]
+		if not choice or type(choice.Id) ~= "string" then
+			return
+		end
+		pendingChoice = true
+		hideChoices()
+		remote:FireServer("Choose", activeSessionId, choice.Id)
+	end
+
 	local function unbindGui()
 		disconnectConnections(guiConnections)
 		cancelTween()
@@ -293,22 +422,6 @@ function DialogueController.Start()
 			refs.WarningText.Visible = false
 		end
 
-		local function choose(index)
-			if pendingChoice or typing or activeSessionId == nil then
-				if typing then
-					finishTypewriter()
-				end
-				return
-			end
-			local choice = currentChoices[index]
-			if not choice or type(choice.Id) ~= "string" then
-				return
-			end
-			pendingChoice = true
-			hideChoices()
-			remote:FireServer("Choose", activeSessionId, choice.Id)
-		end
-
 		table.insert(guiConnections, refs.Option1.Activated:Connect(function()
 			choose(1)
 		end))
@@ -316,6 +429,16 @@ function DialogueController.Start()
 			choose(2)
 		end))
 		return true
+	end
+
+	local function resetLocalSession()
+		activeSessionId = nil
+		pendingChoice = false
+		cancelTypewriter(false)
+		releaseInteraction(true)
+		if refs then
+			refs.Gui.Enabled = false
+		end
 	end
 
 	bindGui()
@@ -327,45 +450,51 @@ function DialogueController.Start()
 	end))
 	table.insert(connections, playerGui.ChildRemoved:Connect(function(child)
 		if refs and child == refs.Gui then
+			if activeSessionId ~= nil then
+				remote:FireServer("Close", activeSessionId)
+			end
+			resetLocalSession()
 			unbindGui()
 		end
 	end))
 	table.insert(connections, player.CharacterAdded:Connect(function()
-		activeSessionId = nil
-		pendingChoice = false
-		if refs then
-			refs.Gui.Enabled = false
-		end
+		resetLocalSession()
 	end))
 	table.insert(connections, player.CharacterRemoving:Connect(function()
-		activeSessionId = nil
-		pendingChoice = false
-		cancelTypewriter(false)
-		if refs then
-			refs.Gui.Enabled = false
-		end
+		resetLocalSession()
 	end))
 	table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
-		if processed or not typing or activeSessionId == nil then
+		if processed or activeSessionId == nil then
 			return
 		end
-		if input.UserInputType == Enum.UserInputType.MouseButton1
+		local advanceInput = input.UserInputType == Enum.UserInputType.MouseButton1
 			or input.UserInputType == Enum.UserInputType.Touch
 			or input.KeyCode == Enum.KeyCode.E
 			or input.KeyCode == Enum.KeyCode.Space
 			or input.KeyCode == Enum.KeyCode.Return
 			or input.KeyCode == Enum.KeyCode.ButtonA
-		then
+		if not advanceInput then
+			return
+		end
+		if typing then
 			finishTypewriter()
+			return
+		end
+		if input.UserInputType ~= Enum.UserInputType.MouseButton1
+			and input.UserInputType ~= Enum.UserInputType.Touch
+		then
+			choose(1)
 		end
 	end))
 	table.insert(connections, remote.OnClientEvent:Connect(function(operation, sessionId, payload)
 		if operation == "Open" then
 			if not refs and not bindGui() then
+				remote:FireServer("Close", sessionId)
 				return
 			end
 			activeSessionId = sessionId
 			pendingChoice = false
+			engageInteraction(payload or {})
 			openPresentation(payload or {})
 		elseif operation == "Node" then
 			if sessionId ~= activeSessionId then
@@ -377,6 +506,7 @@ function DialogueController.Start()
 				return
 			end
 			activeSessionId = nil
+			releaseInteraction(false)
 			local reason = payload
 			closePresentation(reason == "WalkedAway")
 		end
@@ -387,6 +517,7 @@ function DialogueController.Start()
 			remote:FireServer("Close", activeSessionId)
 		end
 		activeSessionId = nil
+		releaseInteraction(true)
 		disconnectConnections(connections)
 		unbindGui()
 	end

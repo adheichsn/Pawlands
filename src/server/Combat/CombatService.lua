@@ -5,6 +5,7 @@ local Workspace = game:GetService("Workspace")
 
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerCombat)
+local DialogueConfig = require(Shared.Config.Dialogue)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local SlimeHealth = require(script.Parent.Parent.Slimes.SlimeHealth)
 local CombatValidation = require(script.Parent.CombatValidation)
@@ -90,6 +91,9 @@ local function resolveAction(state, actionType, comboIndex, now)
 end
 
 local function applyImpact(player, generation, aimDirection, preferredTarget, damageMultiplier, feedbackTier)
+	if player:GetAttribute(DialogueConfig.ActiveAttributeName) == true then
+		return
+	end
 	local state = stateByPlayer[player]
 	if not state or state.Generation ~= generation then
 		return
@@ -145,6 +149,10 @@ local function applyImpact(player, generation, aimDirection, preferredTarget, da
 end
 
 local function processAttack(player, actionType, comboIndex, aimDirection, preferredTarget)
+	if player:GetAttribute(DialogueConfig.ActiveAttributeName) == true then
+		return
+	end
+
 	local now = os.clock()
 	local state = getState(player)
 	if now - state.LastRequestAt < Config.RequestRateLimitSeconds then

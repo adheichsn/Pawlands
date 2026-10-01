@@ -131,9 +131,11 @@ end
 local function closeSession(player, reason)
 	local session = sessions[player]
 	if not session then
+		player:SetAttribute(Config.ActiveAttributeName, false)
 		return
 	end
 	sessions[player] = nil
+	player:SetAttribute(Config.ActiveAttributeName, false)
 	if remote then
 		remote:FireClient(player, "Close", session.Id, reason or "Closed")
 	end
@@ -149,7 +151,13 @@ local function sendCurrentNode(player, operation)
 		closeSession(player, "InvalidNode")
 		return
 	end
-	remote:FireClient(player, operation or "Node", session.Id, serializeNode(session.Definition, node))
+	local payload = serializeNode(session.Definition, node)
+	if operation == "Open" then
+		local npcRoot = findNpcRoot(session.NpcModel)
+		payload.Prompt = session.Prompt
+		payload.NpcPosition = npcRoot and npcRoot.Position or nil
+	end
+	remote:FireClient(player, operation or "Node", session.Id, payload)
 end
 
 local function openForPrompt(prompt, player)
@@ -189,6 +197,7 @@ local function openForPrompt(prompt, player)
 		Prompt = prompt,
 	}
 	sessions[player] = session
+	player:SetAttribute(Config.ActiveAttributeName, true)
 	sendCurrentNode(player, "Open")
 end
 
@@ -271,6 +280,7 @@ end
 
 local function bindPlayer(player)
 	disconnectCharacterRecord(characterConnections[player])
+	player:SetAttribute(Config.ActiveAttributeName, false)
 	characterConnections[player] = {
 		Added = player.CharacterAdded:Connect(function()
 			closeSession(player, "CharacterChanged")

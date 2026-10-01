@@ -17,7 +17,8 @@ Optional authored anchors used when present:
 
 - `DialogueFrame > TypeSound`
 - `DialogueGui > WarningText`
-- `DialogueFrame > ViewportFrame` remains Studio-owned and is not rebuilt by runtime.
+
+`ViewportFrame` is intentionally not part of the Pawlands dialogue contract. The dialogue runtime does not create, clone, or bind a 3D NPC portrait.
 
 NPCs remain Studio-owned. The first registered tutorial NPC is:
 
@@ -31,6 +32,10 @@ Future NPCs can set a Model attribute named `DialogueId` and register the matchi
 - Server validates prompt, NPC, player character, and interaction distance.
 - Server owns active dialogue session and branching node.
 - Client only presents the authored GUI, typewriter, buttons, and open/close motion.
-- Walking out of interaction range closes the server session.
+- Walking out of interaction range closes the server session as a teleport/streaming fail-safe.
 - Character replacement closes stale dialogue state.
-- No tutorial mission state, quest tracking, Slime spawning, or rewards are added in 3A.1.
+- While dialogue is active, movement/run/jump and Player M1 are interaction-locked.
+- The active prompt is hidden locally until the closing presentation finishes.
+- The Player smoothly faces the NPC and local idle Pets settle into a wider side formation.
+- Server combat also rejects Player attacks while the dialogue session attribute is active.
+- No tutorial mission state, quest tracking, Slime spawning, or rewards are added in 3A.1.1.

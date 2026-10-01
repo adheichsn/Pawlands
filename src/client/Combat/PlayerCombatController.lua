@@ -10,6 +10,7 @@ local CombatEffects = require(script.Parent.CombatEffects)
 local PlayerAttackAnimator = require(script.Parent.PlayerAttackAnimator)
 local ComboFlow = require(script.Parent.ComboFlow)
 local PlayerMovementController = require(script.Parent.Parent.Player.PlayerMovementController)
+local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
 
 local PlayerCombatController = {}
 local stopCurrent
@@ -93,6 +94,9 @@ function PlayerCombatController.Start()
 	end
 
 	local function tryAttack()
+		if InteractionLock.IsLocked() then
+			return false
+		end
 		if not character or not humanoid or not root or humanoid.Health <= 0 or not comboRuntime then
 			return false
 		end

@@ -5,6 +5,7 @@ local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):Wai
 local Config = require(Shared.Config.PlayerMovement)
 local RunToggleController = require(script.Parent.Movement.RunToggleController)
 local LocomotionAnimator = require(script.Parent.Animation.LocomotionAnimator)
+local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
 
 local PlayerMovementController = {}
 local stopCurrent
@@ -43,6 +44,9 @@ function PlayerMovementController.Start()
 	local characterCleanup
 	local runToggle
 	local speedTween
+	local activeHumanoid
+	local activeRoot
+	local jumpStateWasEnabled
 
 	local function cancelSpeedTween()
 		if speedTween then
@@ -51,8 +55,44 @@ function PlayerMovementController.Start()
 		end
 	end
 
+	local function setMovementLocked(locked)
+		local humanoid = activeHumanoid
+		if not humanoid or not humanoid.Parent then
+			return
+		end
+
+		cancelSpeedTween()
+		if locked then
+			if runToggle then
+				runToggle:Reset()
+			end
+			if jumpStateWasEnabled == nil then
+				jumpStateWasEnabled = humanoid:GetStateEnabled(Enum.HumanoidStateType.Jumping)
+			end
+			humanoid.WalkSpeed = 0
+			humanoid.Jump = false
+			humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, false)
+			if activeRoot and activeRoot.Parent then
+				local velocity = activeRoot.AssemblyLinearVelocity
+				activeRoot.AssemblyLinearVelocity = Vector3.new(0, velocity.Y, 0)
+			end
+		else
+			if jumpStateWasEnabled ~= nil then
+				humanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, jumpStateWasEnabled)
+				jumpStateWasEnabled = nil
+			end
+			humanoid.WalkSpeed = Config.WalkSpeed
+		end
+	end
+
 	local function cleanupCharacter()
 		cancelSpeedTween()
+		if activeHumanoid and activeHumanoid.Parent and jumpStateWasEnabled ~= nil then
+			activeHumanoid:SetStateEnabled(Enum.HumanoidStateType.Jumping, jumpStateWasEnabled)
+		end
+		jumpStateWasEnabled = nil
+		activeHumanoid = nil
+		activeRoot = nil
 		if characterCleanup then
 			characterCleanup()
 			characterCleanup = nil
@@ -67,6 +107,8 @@ function PlayerMovementController.Start()
 
 		local humanoid = character:WaitForChild("Humanoid")
 		local root = character:WaitForChild("HumanoidRootPart")
+		activeHumanoid = humanoid
+		activeRoot = root
 		if humanoid.RigType ~= Enum.HumanoidRigType.R6 then
 			warn("[Pawlands Movement] Custom locomotion is authored for R6; runtime skipped.")
 			return
@@ -77,6 +119,7 @@ function PlayerMovementController.Start()
 
 		humanoid.WalkSpeed = Config.WalkSpeed
 		local locomotion = LocomotionAnimator.new(humanoid, root, animator)
+		setMovementLocked(InteractionLock.IsLocked())
 		local updateConnection = RunService.PreRender:Connect(function()
 			locomotion:Update(runToggle and runToggle:IsRunning() or false)
 		end)
@@ -93,6 +136,10 @@ function PlayerMovementController.Start()
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 then
 			cancelSpeedTween()
+			if InteractionLock.IsLocked() then
+				humanoid.WalkSpeed = 0
+				return
+			end
 			local targetSpeed = running and Config.RunSpeed or Config.WalkSpeed
 			if Config.SpeedTransitionSeconds > 0 then
 				speedTween = TweenService:Create(
@@ -112,6 +159,7 @@ function PlayerMovementController.Start()
 	end)
 	activeRunToggle = runToggle
 
+	local stopLockObserver = InteractionLock.Subscribe(setMovementLocked)
 	local addedConnection = player.CharacterAdded:Connect(bindCharacter)
 	local removingConnection = player.CharacterRemoving:Connect(cleanupCharacter)
 	if player.Character then
@@ -121,6 +169,7 @@ function PlayerMovementController.Start()
 	stopCurrent = function()
 		addedConnection:Disconnect()
 		removingConnection:Disconnect()
+		stopLockObserver()
 		cleanupCharacter()
 		if runToggle then
 			runToggle:Destroy()
@@ -131,6 +180,9 @@ function PlayerMovementController.Start()
 end
 
 function PlayerMovementController.IsRunning()
+	if InteractionLock.IsLocked() then
+		return false
+	end
 	return activeRunToggle and activeRunToggle:IsRunning() or false
 end
 

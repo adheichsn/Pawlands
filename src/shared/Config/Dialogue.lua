@@ -12,6 +12,7 @@ return table.freeze({
 	WarningTextName = "WarningText",
 
 	DialogueIdAttribute = "DialogueId",
+	ActiveAttributeName = "PawlandsDialogueActive",
 	NpcRootPartName = "HumanoidRootPart",
 	DefaultPromptDistance = 10,
 	MaximumServerDistance = 18,
@@ -25,6 +26,7 @@ return table.freeze({
 
 	OpenTweenSeconds = 0.25,
 	CloseTweenSeconds = 0.20,
+	FaceNpcTweenSeconds = 0.22,
 	WarningVisibleSeconds = 2.0,
 
 	ContinueChoiceId = "__continue",

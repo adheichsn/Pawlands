@@ -18,6 +18,7 @@ local CombatTransitionRuntime = require(script.Parent.Combat.CombatTransitionRun
 local PetVitalsObserver = require(script.Parent.Combat.PetVitalsObserver)
 local PetCombatPresentationRuntime = require(script.Parent.Combat.PetCombatPresentationRuntime)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
+local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
 
 local PetFollowController = {}
 local stopCurrent
@@ -191,8 +192,19 @@ function PetFollowController.Start()
 			CombatAttackRuntime.trim(entry.CombatAttackStates, #entry.Party)
 			CombatTransitionRuntime.trim(entry.CombatTransitionStates, #entry.Party)
 
+			local dialogueIdle = player == Players.LocalPlayer and InteractionLock.IsLocked("Dialogue")
 			for slot, visual in pairs(entry.Visuals) do
-				local x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
+				local x, z
+				if dialogueIdle and not combatGoals[slot] then
+					x, z = Formation.dialogueSlot(
+						slot,
+						Config.DialogueSpacing,
+						Config.DialogueRowDepth,
+						Config.DialogueFirstRow
+					)
+				else
+					x, z = Formation.slot(slot, #entry.Party, spacing, depth, Config.FirstRow)
+				end
 				local followGoal = frame:PointToWorldSpace(Vector3.new(x, 0, z))
 				local combatGoal = combatGoals[slot]
 				local targetToken = targetModels[slot]

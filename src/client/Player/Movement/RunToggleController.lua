@@ -1,6 +1,7 @@
 local UserInputService = game:GetService("UserInputService")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PlayerMovement)
+local InteractionLock = require(script.Parent.Parent.Parent.Interaction.InteractionLock)
 
 local RunToggleController = {}
 RunToggleController.__index = RunToggleController
@@ -21,7 +22,7 @@ function RunToggleController.new(changed)
 	}, RunToggleController)
 
 	self.Connection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed or UserInputService:GetFocusedTextBox() then
+		if gameProcessed or UserInputService:GetFocusedTextBox() or InteractionLock.IsLocked() then
 			return
 		end
 		if input.UserInputType ~= Enum.UserInputType.Keyboard or not isToggleKey(input.KeyCode) then
