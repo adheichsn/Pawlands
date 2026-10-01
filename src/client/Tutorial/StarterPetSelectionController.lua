@@ -160,6 +160,8 @@ local function bindGui()
 	if not refs then
 		return false
 	end
+	-- The authored full-screen dimmer should also cover the Roblox top-bar inset.
+	refs.Gui.IgnoreGuiInset = true
 	for species, cardRef in pairs(refs.Cards) do
 		table.insert(uiConnections, cardRef.Button.Activated:Connect(function()
 			choose(species)

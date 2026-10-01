@@ -52,6 +52,13 @@ local function resolveRefs()
 	local petMain = petsPage and child(petsPage, "Main", "Frame")
 	local petInventory = petMain and child(petMain, "Inventory", "ScrollingFrame")
 	local petTemplate = petInventory and child(petInventory, "Tile", "ImageButton")
+	local petTop = petsPage and child(petsPage, "Top", "Frame")
+	local partyLayout = petTop and petTop:FindFirstChildWhichIsA("UIGridLayout")
+	local addFrame = petTop and child(petTop, "AddFrame", "Frame")
+	local addTile = addFrame and addFrame:FindFirstChild("AddTile")
+	if addTile and not addTile:IsA("GuiObject") then
+		addTile = nil
+	end
 	local equipLabel = petsPage and child(petsPage, "EquipLabel", "TextLabel")
 	local closeButton = content and child(content, "Close", "ImageButton")
 	local top = main and child(main, "Top", "Frame")
@@ -73,7 +80,8 @@ local function resolveRefs()
 	local hudKeyButton = hudButton and child(hudButton, InventoryConfig.HudKeyButtonName, "ImageButton")
 
 	if not gui or not main or not pages or not petsPage or not itemsPage or not nonePage
-		or not petInventory or not petTemplate or not equipLabel or not closeButton
+		or not petInventory or not petTemplate or not petTop or not partyLayout
+		or not addFrame or not addTile or not equipLabel or not closeButton
 		or not favorite or not favoriteLabel or not favoriteLabel:IsA("TextLabel")
 		or not searchBar or not autoOptions or not options or not petsTab or not itemsTab
 		or not sellAll or not configuration or not hudButton or not hudKeyButton
@@ -92,6 +100,10 @@ local function resolveRefs()
 		NonePage = nonePage,
 		PetInventory = petInventory,
 		PetTemplate = petTemplate,
+		PetTop = petTop,
+		PartyLayout = partyLayout,
+		AddFrame = addFrame,
+		AddTile = addTile,
 		EquipLabel = equipLabel,
 		CloseButton = closeButton,
 		Favorite = favorite,
@@ -118,14 +130,34 @@ local function partySet(party)
 	return set
 end
 
-local function clearRuntimeTiles(current)
-	for _, item in ipairs(current.PetInventory:GetChildren()) do
-		if item:IsA("GuiObject") and string.sub(item.Name, 1, #InventoryConfig.RuntimePetTilePrefix)
-			== InventoryConfig.RuntimePetTilePrefix
-		then
-			item:Destroy()
+local function hasPrefix(name, prefix)
+	return string.sub(name, 1, #prefix) == prefix
+end
+
+local function clearRuntimeChildren(container, prefixes)
+	for _, item in ipairs(container:GetChildren()) do
+		if item:IsA("GuiObject") then
+			for _, prefix in ipairs(prefixes) do
+				if hasPrefix(item.Name, prefix) then
+					item:Destroy()
+					break
+				end
+			end
 		end
 	end
+end
+
+local function clearRuntimeTiles(current)
+	clearRuntimeChildren(current.PetInventory, { InventoryConfig.RuntimePetTilePrefix })
+	clearRuntimeChildren(current.PetTop, { InventoryConfig.RuntimePartySlotPrefix })
+end
+
+local function normalizedVariant(pet)
+	local variant = string.match(tostring(pet and pet.Variant or ""), "^%s*(.-)%s*$")
+	if string.lower(variant) == string.lower(InventoryConfig.DefaultVariantName) then
+		return ""
+	end
+	return variant
 end
 
 local function searchTextFor(pet)
@@ -133,7 +165,7 @@ local function searchTextFor(pet)
 	return string.lower(table.concat({
 		tostring(pet.PetId or ""),
 		tostring(pet.SpeciesId or ""),
-		tostring(pet.Variant or ""),
+		normalizedVariant(pet),
 		tostring(definition and definition.Rarity or ""),
 	}, " "))
 end
@@ -176,8 +208,8 @@ local function handleTileActivated(uid)
 	end
 end
 
-local function configureTile(tile, pet, equipped, order)
-	tile.Name = InventoryConfig.RuntimePetTilePrefix .. pet.Uid
+local function configureTile(tile, pet, equipped, order, namePrefix)
+	tile.Name = (namePrefix or InventoryConfig.RuntimePetTilePrefix) .. pet.Uid
 	tile.LayoutOrder = order
 	tile.Visible = true
 	tile:SetAttribute("PawlandsPetUid", pet.Uid)
@@ -205,8 +237,12 @@ local function configureTile(tile, pet, equipped, order)
 	if attack and attack:IsA("TextLabel") and definition then
 		attack.Text = string.format(InventoryConfig.DamageTextFormat, definition.BaseDamage)
 	end
+	local visibleVariant = normalizedVariant(pet)
+	if variant and variant:IsA("GuiObject") then
+		variant.Visible = visibleVariant ~= ""
+	end
 	if variantName and variantName:IsA("TextLabel") then
-		variantName.Text = pet.Variant or "Normal"
+		variantName.Text = visibleVariant
 	end
 	if equippedFrame and equippedFrame:IsA("GuiObject") then
 		equippedFrame.Visible = equipped == true
@@ -215,6 +251,39 @@ local function configureTile(tile, pet, equipped, order)
 	tile.Activated:Connect(function()
 		handleTileActivated(pet.Uid)
 	end)
+end
+
+local function makePartySlot(current, slotIndex, pet)
+	local slot = current.AddFrame:Clone()
+	slot.Name = InventoryConfig.RuntimePartySlotPrefix .. tostring(slotIndex)
+	slot.LayoutOrder = slotIndex
+	slot.Visible = true
+
+	local addTile = slot:FindFirstChild("AddTile")
+	if addTile and addTile:IsA("GuiObject") then
+		addTile.Visible = pet == nil
+		if addTile:IsA("GuiButton") then
+			addTile.Active = false
+			addTile.Selectable = false
+		end
+	end
+
+	if pet then
+		local tile = current.PetTemplate:Clone()
+		configureTile(
+			tile,
+			pet,
+			true,
+			slotIndex,
+			InventoryConfig.RuntimeEquippedPetTilePrefix
+		)
+		tile.Position = UDim2.fromOffset(0, 0)
+		tile.AnchorPoint = Vector2.new(0, 0)
+		tile.Size = UDim2.fromScale(1, 1)
+		tile.Parent = slot
+	end
+
+	slot.Parent = current.PetTop
 end
 
 local function applyPageAndSearch()
@@ -230,23 +299,20 @@ local function applyPageAndSearch()
 	end
 
 	local query = string.lower(string.match(current.SearchBar.Text or "", "^%s*(.-)%s*$"))
-	local visibleCount = 0
 	for _, item in ipairs(current.PetInventory:GetChildren()) do
-		if item:IsA("GuiObject") and string.sub(item.Name, 1, #InventoryConfig.RuntimePetTilePrefix)
-			== InventoryConfig.RuntimePetTilePrefix
-		then
+		if item:IsA("GuiObject") and hasPrefix(item.Name, InventoryConfig.RuntimePetTilePrefix) then
 			local haystack = item:GetAttribute("PawlandsPetSearch")
-			local visible = query == ""
+			item.Visible = query == ""
 				or (type(haystack) == "string" and string.find(haystack, query, 1, true) ~= nil)
-			item.Visible = visible
-			if visible then
-				visibleCount += 1
-			end
 		end
 	end
-	current.PetsPage.Visible = visibleCount > 0
+
+	-- Keep the Pets page visible even when every owned Pet is equipped. Equipped Pets
+	-- live in the authored top party strip and must never disappear because the
+	-- unequipped inventory grid is empty or filtered by Search.
+	current.PetsPage.Visible = true
 	current.ItemsPage.Visible = false
-	current.NonePage.Visible = visibleCount <= 0
+	current.NonePage.Visible = false
 end
 
 renderSnapshot = function()
@@ -256,13 +322,34 @@ renderSnapshot = function()
 	end
 	clearRuntimeTiles(current)
 	local equipped = partySet(snapshot.Party)
-	for index, pet in ipairs(snapshot.Pets or {}) do
-		if type(pet) == "table" and type(pet.Uid) == "string" and PetCatalog.Pets[pet.PetId] then
+	local petsByUid = {}
+	for _, pet in ipairs(snapshot.Pets or {}) do
+		if type(pet) == "table" and type(pet.Uid) == "string" then
+			petsByUid[pet.Uid] = pet
+		end
+	end
+
+	for slotIndex = 1, PetPartyConfig.MaxSize do
+		local uid = snapshot.Party and snapshot.Party[slotIndex]
+		local pet = uid and petsByUid[uid] or nil
+		if pet and not PetCatalog.Pets[pet.PetId] then
+			pet = nil
+		end
+		makePartySlot(current, slotIndex, pet)
+	end
+
+	local inventoryOrder = 0
+	for _, pet in ipairs(snapshot.Pets or {}) do
+		if type(pet) == "table" and type(pet.Uid) == "string"
+			and PetCatalog.Pets[pet.PetId] and not equipped[pet.Uid]
+		then
+			inventoryOrder += 1
 			local tile = current.PetTemplate:Clone()
-			configureTile(tile, pet, equipped[pet.Uid], index)
+			configureTile(tile, pet, false, inventoryOrder, InventoryConfig.RuntimePetTilePrefix)
 			tile.Parent = current.PetInventory
 		end
 	end
+
 	current.EquipLabel.Text = string.format(
 		InventoryConfig.EquippedPetsTextFormat,
 		#(snapshot.Party or {}),
@@ -315,11 +402,26 @@ local function openInventory()
 end
 
 local function prepareAuthoredUi(current)
+	-- Let the authored modal/dimmer reach the physical top edge instead of stopping
+	-- below Roblox's top-bar inset. No GUI objects are created for this.
+	current.Gui.IgnoreGuiInset = true
+
 	-- HUD is Studio-owned but originally resets on respawn. Keep this exact cloned
 	-- PlayerGui instance so the bound InventoryButton does not become stale.
 	current.Hud.ResetOnSpawn = false
 	current.Gui.Enabled = false
 	current.PetTemplate.Visible = false
+	current.AddFrame.Visible = false
+
+	-- Reuse the authored Top UIGridLayout and authored AddFrame size for the four
+	-- party slots. Runtime does not create a layout or slot hierarchy from scratch.
+	current.PartyLayout.CellSize = current.AddFrame.Size
+	current.PartyLayout.FillDirection = Enum.FillDirection.Horizontal
+	current.PartyLayout.FillDirectionMaxCells = PetPartyConfig.MaxSize
+	current.PartyLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+	current.PartyLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+	current.PartyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
 	current.AutoOptions.Visible = false
 	current.SellAll.Visible = false
 	current.Configuration.Visible = false

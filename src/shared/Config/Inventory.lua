@@ -11,6 +11,9 @@ return table.freeze({
 	HudKeyButtonName = "KeyButton",
 
 	RuntimePetTilePrefix = "RuntimePet_",
+	RuntimeEquippedPetTilePrefix = "RuntimeEquippedPet_",
+	RuntimePartySlotPrefix = "RuntimePartySlot_",
+	DefaultVariantName = "Normal",
 	FavoriteOffText = "Favorite: OFF",
 	FavoriteOnText = "Favorite: ON",
 	EquippedPetsTextFormat = "Equipped Pets (%d/%d)",
