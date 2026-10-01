@@ -3,7 +3,7 @@ return table.freeze({
 	-- open-world traversal does not require holding a modifier.
 	WalkSpeed = 10,
 	RunSpeed = 16,
-	RunToggleKeys = table.freeze({ Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl }),
+	RunToggleKeys = table.freeze({ Enum.KeyCode.LeftControl, Enum.KeyCode.RightControl, Enum.KeyCode.ButtonL3 }),
 	SpeedTransitionSeconds = 0.16,
 
 	MoveDeadzone = 0.05,

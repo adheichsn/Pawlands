@@ -14,7 +14,10 @@ local heartbeatConnection = nil
 local playerAddedConnection = nil
 local playerRemovingConnection = nil
 local runtimeChildAddedConnection = nil
+local inputRemoteConnection = nil
+local inputRemote = nil
 local watchedSlimes = {}
+local onboardingByPlayer = {}
 local accumulator = 0
 local waveActive = false
 local waveGoal = 0
@@ -28,11 +31,31 @@ local function stageOf(player)
 	return stage
 end
 
+local function onboardingState(player)
+	local state = onboardingByPlayer[player]
+	if not state then
+		state = {
+			MoveOrigin = nil,
+			SprintSeconds = 0,
+			InputMode = nil,
+		}
+		onboardingByPlayer[player] = state
+	end
+	return state
+end
+
+local function resetOnboardingProgress(player)
+	local state = onboardingState(player)
+	state.MoveOrigin = nil
+	state.SprintSeconds = 0
+end
+
 local function setStage(player, stage)
 	player:SetAttribute(TutorialConfig.StageAttributeName, stage)
 	local combatEligible = stage == TutorialConfig.Stages.GoToZone
 		or stage == TutorialConfig.Stages.InCombat
 	player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, combatEligible)
+	resetOnboardingProgress(player)
 end
 
 local function setProgress(player, current, goal)
@@ -40,11 +63,39 @@ local function setProgress(player, current, goal)
 	player:SetAttribute(TutorialConfig.GoalAttributeName, math.max(0, math.floor(goal or 0)))
 end
 
+local function ensureInputRemote()
+	local pawlands = ReplicatedStorage:WaitForChild("Pawlands")
+	local folder = pawlands:FindFirstChild(TutorialConfig.RemoteFolderName)
+	if folder and not folder:IsA("Folder") then
+		folder:Destroy()
+		folder = nil
+	end
+	if not folder then
+		folder = Instance.new("Folder")
+		folder.Name = TutorialConfig.RemoteFolderName
+		folder.Parent = pawlands
+	end
+	local remote = folder:FindFirstChild(TutorialConfig.InputModeRemoteName)
+	if remote and not remote:IsA("RemoteEvent") then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new("RemoteEvent")
+		remote.Name = TutorialConfig.InputModeRemoteName
+		remote.Parent = folder
+	end
+	return remote
+end
+
 local function bindPlayer(player)
-	if player:GetAttribute(TutorialConfig.StageAttributeName) == nil then
-		setStage(player, TutorialConfig.Stages.NotStarted)
+	local existingStage = stageOf(player)
+	if player:GetAttribute(TutorialConfig.StageAttributeName) == nil
+		or existingStage == TutorialConfig.Stages.NotStarted
+	then
+		setStage(player, TutorialConfig.Stages.LearnMove)
 	else
-		setStage(player, stageOf(player))
+		setStage(player, existingStage)
 	end
 	if player:GetAttribute(TutorialConfig.ProgressAttributeName) == nil then
 		player:SetAttribute(TutorialConfig.ProgressAttributeName, 0)
@@ -52,6 +103,7 @@ local function bindPlayer(player)
 	if player:GetAttribute(TutorialConfig.GoalAttributeName) == nil then
 		player:SetAttribute(TutorialConfig.GoalAttributeName, 0)
 	end
+	player:SetAttribute(TutorialConfig.InputModeAttributeName, "")
 end
 
 local function activeParticipants()
@@ -147,16 +199,65 @@ local function getAliveRoot(player)
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	local root = character and character:FindFirstChild("HumanoidRootPart")
 	if not humanoid or humanoid.Health <= 0 or not root or not root:IsA("BasePart") then
-		return nil
+		return nil, nil
 	end
-	return root
+	return root, humanoid
+end
+
+local function horizontalDistance(a, b)
+	local delta = a - b
+	return Vector3.new(delta.X, 0, delta.Z).Magnitude
+end
+
+local function horizontalSpeed(root)
+	local velocity = root.AssemblyLinearVelocity
+	return Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+end
+
+local function updateOnboarding(player, dt)
+	local stage = stageOf(player)
+	if stage ~= TutorialConfig.Stages.LearnMove and stage ~= TutorialConfig.Stages.LearnSprint then
+		return
+	end
+	local root, humanoid = getAliveRoot(player)
+	if not root or not humanoid then
+		return
+	end
+	local state = onboardingState(player)
+	if stage == TutorialConfig.Stages.LearnMove then
+		if not state.MoveOrigin then
+			state.MoveOrigin = root.Position
+			return
+		end
+		if horizontalDistance(root.Position, state.MoveOrigin) >= TutorialConfig.MoveLessonDistanceStuds then
+			if state.InputMode == TutorialConfig.InputModes.Touch then
+				setStage(player, TutorialConfig.Stages.MeetAlex)
+			else
+				setStage(player, TutorialConfig.Stages.LearnSprint)
+			end
+		end
+		return
+	end
+
+	if state.InputMode == TutorialConfig.InputModes.Touch then
+		setStage(player, TutorialConfig.Stages.MeetAlex)
+		return
+	end
+	if horizontalSpeed(root) >= TutorialConfig.SprintLessonMinSpeedStuds then
+		state.SprintSeconds += dt
+	else
+		state.SprintSeconds = math.max(0, state.SprintSeconds - dt * 0.5)
+	end
+	if state.SprintSeconds >= TutorialConfig.SprintLessonRequiredSeconds then
+		setStage(player, TutorialConfig.Stages.MeetAlex)
+	end
 end
 
 local function beginWave()
 	if waveActive then
 		return true
 	end
-	local ok, spawnedOrReason = slimeMovementService.BeginTutorialEncounter()
+	local ok, spawnedOrReason = slimeMovementService.BeginTutorialEncounter(TutorialConfig.SoloCombatSlimeCount)
 	if not ok then
 		return false, spawnedOrReason
 	end
@@ -193,24 +294,43 @@ local function updateZoneEntries()
 	end
 end
 
+local function handleInputMode(player, mode)
+	if not started or player.Parent ~= Players or type(mode) ~= "string" then
+		return
+	end
+	if mode ~= TutorialConfig.InputModes.Keyboard
+		and mode ~= TutorialConfig.InputModes.Gamepad
+		and mode ~= TutorialConfig.InputModes.Touch
+	then
+		return
+	end
+	local state = onboardingState(player)
+	state.InputMode = mode
+	player:SetAttribute(TutorialConfig.InputModeAttributeName, mode)
+	if mode == TutorialConfig.InputModes.Touch and stageOf(player) == TutorialConfig.Stages.LearnSprint then
+		setStage(player, TutorialConfig.Stages.MeetAlex)
+	end
+end
+
 function TutorialService.HandleDialogueAction(player, action)
 	if not started or not player or player.Parent ~= Players then
 		return false
 	end
 	local stage = stageOf(player)
 	if action == TutorialConfig.AcceptCombatAction then
-		if stage == TutorialConfig.Stages.NotStarted then
+		if stage == TutorialConfig.Stages.MeetAlex then
 			setProgress(player, 0, 0)
 			setStage(player, TutorialConfig.Stages.GoToZone)
+			return true
 		end
-		return stage == TutorialConfig.Stages.NotStarted
-			or stage == TutorialConfig.Stages.GoToZone
-			or stage == TutorialConfig.Stages.InCombat
-	elseif action == TutorialConfig.CompleteCombatAction then
+		return stage == TutorialConfig.Stages.GoToZone or stage == TutorialConfig.Stages.InCombat
+	elseif action == TutorialConfig.CompleteSoloCombatAction
+		or action == TutorialConfig.CompleteCombatAction
+	then
 		if stage ~= TutorialConfig.Stages.ReturnToAlex then
 			return false
 		end
-		setStage(player, TutorialConfig.Stages.Completed)
+		setStage(player, TutorialConfig.Stages.SoloComplete)
 		setProgress(player, 0, 0)
 		return true
 	end
@@ -226,6 +346,8 @@ function TutorialService.Start(slimeService)
 	end
 	started = true
 	slimeMovementService = slimeService
+	inputRemote = ensureInputRemote()
+	inputRemoteConnection = inputRemote.OnServerEvent:Connect(handleInputMode)
 
 	for _, player in ipairs(Players:GetPlayers()) do
 		bindPlayer(player)
@@ -233,6 +355,7 @@ function TutorialService.Start(slimeService)
 	playerAddedConnection = Players.PlayerAdded:Connect(bindPlayer)
 	playerRemovingConnection = Players.PlayerRemoving:Connect(function(player)
 		player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, false)
+		onboardingByPlayer[player] = nil
 	end)
 
 	slimeMovementService.SetPlayerEligibilityResolver(function(player)
@@ -245,7 +368,11 @@ function TutorialService.Start(slimeService)
 		if accumulator < TutorialConfig.ZoneCheckSeconds then
 			return
 		end
+		local stepDt = accumulator
 		accumulator = 0
+		for _, player in ipairs(Players:GetPlayers()) do
+			updateOnboarding(player, stepDt)
+		end
 		updateZoneEntries()
 	end)
 end
@@ -271,6 +398,10 @@ function TutorialService.Stop()
 		runtimeChildAddedConnection:Disconnect()
 		runtimeChildAddedConnection = nil
 	end
+	if inputRemoteConnection then
+		inputRemoteConnection:Disconnect()
+		inputRemoteConnection = nil
+	end
 	for model in pairs(watchedSlimes) do
 		unwatchSlime(model)
 	end
@@ -281,10 +412,12 @@ function TutorialService.Stop()
 	for _, player in ipairs(Players:GetPlayers()) do
 		player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, false)
 	end
+	table.clear(onboardingByPlayer)
 	waveActive = false
 	waveGoal = 0
 	waveDefeated = 0
 	accumulator = 0
+	inputRemote = nil
 	slimeMovementService = nil
 end
 

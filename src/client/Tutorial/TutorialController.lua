@@ -1,11 +1,14 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
-local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
+local Pawlands = ReplicatedStorage:WaitForChild("Pawlands")
+local Shared = Pawlands:WaitForChild("Shared")
 local TutorialConfig = require(Shared.Config.Tutorial)
 local DialogueConfig = require(Shared.Config.Dialogue)
 local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
+local TextNotificationController = require(script.Parent.Parent.Notifications.TextNotificationController)
 
 local TutorialController = {}
 local player = Players.LocalPlayer
@@ -15,6 +18,8 @@ local heartbeatConnection = nil
 local refs = nil
 local accumulator = 0
 local warnedMissing = false
+local lastReportedInputMode = nil
+local inputRemote = nil
 
 local function disconnectAll()
 	for _, connection in ipairs(connections) do
@@ -140,9 +145,80 @@ end
 local function stageOf()
 	local stage = player:GetAttribute(TutorialConfig.StageAttributeName)
 	if type(stage) ~= "string" then
-		return TutorialConfig.Stages.NotStarted
+		return TutorialConfig.Stages.LearnMove
 	end
 	return stage
+end
+
+local function currentInputMode(lastInputType)
+	lastInputType = lastInputType or UserInputService:GetLastInputType()
+	if lastInputType == Enum.UserInputType.Touch then
+		return TutorialConfig.InputModes.Touch
+	end
+	if string.find(lastInputType.Name, "Gamepad", 1, true) then
+		return TutorialConfig.InputModes.Gamepad
+	end
+	if UserInputService.KeyboardEnabled then
+		return TutorialConfig.InputModes.Keyboard
+	end
+	if UserInputService.GamepadEnabled then
+		return TutorialConfig.InputModes.Gamepad
+	end
+	if UserInputService.TouchEnabled then
+		return TutorialConfig.InputModes.Touch
+	end
+	return TutorialConfig.InputModes.Keyboard
+end
+
+local function reportInputMode(inputType)
+	if not inputRemote then
+		return
+	end
+	local mode = currentInputMode(inputType)
+	if mode == lastReportedInputMode then
+		return
+	end
+	lastReportedInputMode = mode
+	inputRemote:FireServer(mode)
+end
+
+local function dialogueActive()
+	return player:GetAttribute(DialogueConfig.ActiveAttributeName) == true
+		or InteractionLock.IsLocked("Dialogue")
+end
+
+local function renderGuidance()
+	if dialogueActive() then
+		TextNotificationController.Clear(TutorialConfig.NotificationKey)
+		return
+	end
+	local stage = stageOf()
+	local inputMode = currentInputMode()
+	local text = nil
+	if stage == TutorialConfig.Stages.LearnMove then
+		if inputMode == TutorialConfig.InputModes.Touch then
+			text = TutorialConfig.MoveHintTouch
+		elseif inputMode == TutorialConfig.InputModes.Gamepad then
+			text = TutorialConfig.MoveHintGamepad
+		else
+			text = TutorialConfig.MoveHintKeyboard
+		end
+	elseif stage == TutorialConfig.Stages.LearnSprint then
+		if inputMode == TutorialConfig.InputModes.Gamepad then
+			text = TutorialConfig.SprintHintGamepad
+		elseif inputMode == TutorialConfig.InputModes.Keyboard then
+			text = TutorialConfig.SprintHintKeyboard
+		end
+	elseif stage == TutorialConfig.Stages.InCombat
+		and inputMode == TutorialConfig.InputModes.Keyboard
+	then
+		text = TutorialConfig.CombatHintKeyboard
+	end
+	if text then
+		TextNotificationController.ShowText(TutorialConfig.NotificationKey, text)
+	else
+		TextNotificationController.Clear(TutorialConfig.NotificationKey)
+	end
 end
 
 local function setBar(alpha)
@@ -154,7 +230,7 @@ local function setBar(alpha)
 	refs.Bar.Size = UDim2.new(base.X.Scale * alpha, math.floor(base.X.Offset * alpha), base.Y.Scale, base.Y.Offset)
 end
 
-local function render()
+local function renderTracker()
 	if not refs or not refs.Gui.Parent then
 		refs = resolveRefs()
 		if refs then
@@ -169,10 +245,9 @@ local function render()
 	end
 
 	local stage = stageOf()
-	local dialogueActive = player:GetAttribute(DialogueConfig.ActiveAttributeName) == true
-		or InteractionLock.IsLocked("Dialogue")
-	local visible = not dialogueActive and (
-		stage == TutorialConfig.Stages.GoToZone
+	local visible = not dialogueActive() and (
+		stage == TutorialConfig.Stages.MeetAlex
+		or stage == TutorialConfig.Stages.GoToZone
 		or stage == TutorialConfig.Stages.InCombat
 		or stage == TutorialConfig.Stages.ReturnToAlex
 	)
@@ -182,7 +257,14 @@ local function render()
 	end
 
 	refs.Header.Text = TutorialConfig.QuestTitle
-	if stage == TutorialConfig.Stages.GoToZone then
+	if stage == TutorialConfig.Stages.MeetAlex then
+		refs.Prefix.Text = TutorialConfig.MeetAlexPrefix
+		refs.ItemName.Text = TutorialConfig.MeetAlexItem
+		if refs.Progress then
+			refs.Progress.Visible = false
+		end
+		setBar(0)
+	elseif stage == TutorialConfig.Stages.GoToZone then
 		refs.Prefix.Text = TutorialConfig.GoToZonePrefix
 		refs.ItemName.Text = TutorialConfig.GoToZoneItem
 		if refs.Progress then
@@ -209,12 +291,19 @@ local function render()
 	end
 end
 
+local function render()
+	renderTracker()
+	renderGuidance()
+end
+
 local function bindPlayerGui()
 	local playerGui = player:WaitForChild("PlayerGui")
 	table.insert(connections, playerGui.ChildAdded:Connect(function(child)
 		if child.Name == TutorialConfig.QuestGuiName then
 			refs = nil
 			task.defer(render)
+		elseif child.Name == "TextNotifications" then
+			task.defer(renderGuidance)
 		end
 	end))
 end
@@ -224,6 +313,7 @@ function TutorialController.Start()
 		return
 	end
 	started = true
+	inputRemote = Pawlands:WaitForChild(TutorialConfig.RemoteFolderName):WaitForChild(TutorialConfig.InputModeRemoteName)
 	bindPlayerGui()
 	for _, attributeName in ipairs({
 		TutorialConfig.StageAttributeName,
@@ -233,6 +323,11 @@ function TutorialController.Start()
 	}) do
 		table.insert(connections, player:GetAttributeChangedSignal(attributeName):Connect(render))
 	end
+	table.insert(connections, UserInputService.LastInputTypeChanged:Connect(function(inputType)
+		reportInputMode(inputType)
+		renderGuidance()
+	end))
+	reportInputMode()
 	heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
 		accumulator += dt
 		if accumulator >= 0.10 then
@@ -253,10 +348,13 @@ function TutorialController.Stop()
 		heartbeatConnection = nil
 	end
 	disconnectAll()
+	TextNotificationController.Clear(TutorialConfig.NotificationKey)
 	if refs and refs.Gui and refs.Gui.Parent then
 		refs.Gui.Enabled = false
 	end
 	refs = nil
+	inputRemote = nil
+	lastReportedInputMode = nil
 	accumulator = 0
 end
 

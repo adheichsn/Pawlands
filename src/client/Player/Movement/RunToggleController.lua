@@ -25,7 +25,7 @@ function RunToggleController.new(changed)
 		if gameProcessed or UserInputService:GetFocusedTextBox() or InteractionLock.IsLocked() then
 			return
 		end
-		if input.UserInputType ~= Enum.UserInputType.Keyboard or not isToggleKey(input.KeyCode) then
+		if not isToggleKey(input.KeyCode) then
 			return
 		end
 		self:SetRunning(not self.Running)

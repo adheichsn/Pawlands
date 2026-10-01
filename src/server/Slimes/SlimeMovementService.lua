@@ -590,8 +590,12 @@ local function step(dt)
 	end
 end
 
-local function spawnAgents()
-	local count = math.min(Config.SpawnCount, #Catalog.Variants, #zone.Points)
+local function spawnAgents(requestedCount)
+	local maximumCount = math.min(Config.SpawnCount, #Catalog.Variants, #zone.Points)
+	local count = maximumCount
+	if requestedCount ~= nil then
+		count = math.clamp(math.floor(tonumber(requestedCount) or maximumCount), 1, maximumCount)
+	end
 	local spawnPositions = zone:GetInsetSpawnPositions(count, 0)
 	local authoredLoopCount = 0
 
@@ -717,7 +721,7 @@ function SlimeMovementService.ContainsPosition(position)
 	return running and zone ~= nil and typeof(position) == "Vector3" and zone:Contains(position) or false
 end
 
-function SlimeMovementService.BeginTutorialEncounter()
+function SlimeMovementService.BeginTutorialEncounter(requestedCount)
 	if not running or not zone or not runtimeFolder then
 		return false, "Slime service is not ready."
 	end
@@ -726,7 +730,7 @@ function SlimeMovementService.BeginTutorialEncounter()
 	end
 	respawnsEnabled = false
 	tutorialEncounterActive = true
-	local authoredLoopCount, spawnedCount = spawnAgents()
+	local authoredLoopCount, spawnedCount = spawnAgents(requestedCount)
 	if spawnedCount <= 0 then
 		tutorialEncounterActive = false
 		return false, "No tutorial Slimes could be spawned."

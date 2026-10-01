@@ -1,27 +1,33 @@
-# Pawlands Tutorial Combat Flow — 3A.2
+# Pawlands First-Time Onboarding & Solo Combat — 3A.3
 
-This stage connects the Studio-owned Alex dialogue, QuestTracker, authored CombatZone, and the existing Slime combat loop into the first tutorial mission.
+This stage extends the Studio-owned tutorial flow with contextual movement guidance, a longer Alex introduction, and a first combat lesson that intentionally happens before the Player receives a starter Pet.
+
+## Studio-owned UI
+
+No GUI hierarchy is created at runtime.
+
+- `StarterGui > TextNotifications > Frame > TextTile` is treated as the authored generic text-notification template. Runtime clones the complete `TextTile` template for tutorial guidance.
+- `StarterGui > QuestTracker` continues to own persistent tutorial objectives.
+- `StarterGui > DialogueGui` continues to own Alex dialogue presentation.
+
+Authored notification preview tiles are hidden at runtime; only a cloned `TextTile` is used by this stage.
 
 ## Flow
 
-1. Talk to `Workspace > StarterStoneIsland > NPC > Alex`.
-2. Choose `I'm ready.`.
-3. The Studio-owned `StarterGui > QuestTracker` shows `Go to Training Area` after dialogue closes.
-4. Enter `Workspace > StarterStoneIsland > Tutorial > Zones > CombatZone`.
-5. The server spawns one four-Slime tutorial wave.
-6. The tracker changes to `Defeat Training Slimes` and updates shared wave progress.
-7. Tutorial Slimes do not respawn during this wave.
-8. After the wave is cleared, the tracker changes to `Return to Alex`.
-9. Talk to Alex and continue once to complete this tutorial combat step.
+1. First spawn begins at `LearnMove`.
+2. `TextTile` teaches movement. The server advances after the character travels enough horizontal distance.
+3. Keyboard Players learn `Ctrl` sprint; gamepad Players learn `L3` sprint. The server validates actual horizontal sprint speed before advancing.
+4. Touch Players currently skip the sprint lesson after movement because Pawlands does not yet have a Studio-owned mobile Sprint button; this patch intentionally does not create one in code.
+5. `QuestTracker` changes to `Meet Alex`.
+6. Alex gives a longer Stone Island / Slime introduction and offers the first training mission.
+7. `QuestTracker` changes to `Go to Training Area`.
+8. Entering the authored CombatZone starts a three-Slime player-only training wave.
+9. Studio automatic Pet preview is disabled so QA matches the live zero-Pet onboarding baseline. Pet dev commands remain available for explicit testing.
+10. Clearing the wave changes the objective to `Return to Alex`.
+11. Alex closes the solo lesson and the tutorial stops at `SoloComplete`, leaving starter-Pet grant / Pet combat training for the next stage.
 
-## Multiplayer behavior
+## Scope boundaries
 
-The authored CombatZone hosts one cooperative tutorial wave at a time. Players who have accepted the mission can join the active wave by entering the zone. Every active tutorial participant sees the same wave progress. Players who have not accepted the mission are not valid targets for tutorial Slimes.
-
-## Current scope
-
-- The tutorial state is server-authoritative for the current server session.
-- Persistence across leave/rejoin is intentionally not added yet; a future profile/save stage should hydrate the existing tutorial attributes before `TutorialService` starts.
-- No Coins, Player EXP, Pet EXP, or general combat reward is granted yet.
-- No runtime GUI hierarchy is created. `QuestTracker` is bound and updated in place.
-- No world-space objective marker is created because no Studio-authored marker asset exists in the current RBXL. The QuestTracker is the current guidance layer.
+- No Pet rarity, Pet base stats, starter-Pet grant, persistence, Coins, EXP, loot, or general combat rewards are added.
+- Existing Player combat damage, Slime combat tuning, Pet combat logic, KO, and reward systems are unchanged.
+- Current Player basic attack input is still mouse-first. Studio-owned mobile/gamepad combat controls should be added in a later input stage before those platforms receive the same attack lesson.
