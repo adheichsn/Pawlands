@@ -5,6 +5,7 @@ local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local InventoryConfig = require(Shared.Config.Inventory)
 local PetCatalog = require(Shared.Config.PetCatalog)
 local PetPartyConfig = require(Shared.Config.PetParty)
+local PetRarityCatalog = require(Shared.Config.PetRarityCatalog)
 local InteractionLock = require(script.Parent.Parent.Interaction.InteractionLock)
 local TextNotificationController = require(script.Parent.Parent.Notifications.TextNotificationController)
 
@@ -203,6 +204,55 @@ local function validOwnedPetCount(value)
 	return count
 end
 
+local function rarityPresentationFor(pet)
+	local definition = pet and PetCatalog.Pets[pet.PetId]
+	local rarityName = definition and definition.Rarity or PetRarityCatalog.FallbackRarity
+	local rarity = PetRarityCatalog.Rarities[rarityName]
+	if rarity then
+		return rarityName, rarity
+	end
+	return PetRarityCatalog.FallbackRarity, PetRarityCatalog.Rarities[PetRarityCatalog.FallbackRarity]
+end
+
+local function inventoryDisplayName(pet)
+	return tostring(pet and (pet.SpeciesId or pet.PetId) or "Pet")
+end
+
+local function sortedOwnedPets(pets)
+	local sorted = {}
+	for _, pet in ipairs(pets or {}) do
+		if type(pet) == "table" and type(pet.Uid) == "string" and PetCatalog.Pets[pet.PetId] then
+			table.insert(sorted, pet)
+		end
+	end
+
+	table.sort(sorted, function(a, b)
+		local aFavorite = a.Favorite == true
+		local bFavorite = b.Favorite == true
+		if aFavorite ~= bFavorite then
+			return aFavorite
+		end
+
+		local _, aRarity = rarityPresentationFor(a)
+		local _, bRarity = rarityPresentationFor(b)
+		local aOrder = aRarity and aRarity.Order or 0
+		local bOrder = bRarity and bRarity.Order or 0
+		if aOrder ~= bOrder then
+			return aOrder > bOrder
+		end
+
+		local aName = string.lower(inventoryDisplayName(a))
+		local bName = string.lower(inventoryDisplayName(b))
+		if aName ~= bName then
+			return aName < bName
+		end
+
+		return tostring(a.Uid) < tostring(b.Uid)
+	end)
+
+	return sorted
+end
+
 local function captureFavoriteStrokeDefaults(template)
 	local stroke = template and template:FindFirstChildOfClass("UIStroke")
 	if not stroke then
@@ -345,7 +395,11 @@ local function configureTile(tile, pet, equipped, order, namePrefix)
 	local equippedFrame = tile:FindFirstChild("Equipped")
 
 	if petName and petName:IsA("TextLabel") then
-		petName.Text = pet.SpeciesId or pet.PetId or "Pet"
+		local _, rarity = rarityPresentationFor(pet)
+		petName.Text = inventoryDisplayName(pet)
+		if rarity then
+			petName.TextColor3 = rarity.Color
+		end
 	end
 	if vector and vector:IsA("ImageLabel") and definition then
 		vector.Image = definition.Icon
@@ -468,21 +522,17 @@ renderSnapshot = function()
 	end
 
 	local inventoryOrder = 0
-	for _, pet in ipairs(snapshot.Pets or {}) do
-		if type(pet) == "table" and type(pet.Uid) == "string"
-			and PetCatalog.Pets[pet.PetId]
-		then
-			inventoryOrder += 1
-			local tile = current.PetTemplate:Clone()
-			configureTile(
-				tile,
-				pet,
-				equipped[pet.Uid] == true,
-				inventoryOrder,
-				InventoryConfig.RuntimePetTilePrefix
-			)
-			tile.Parent = current.PetInventory
-		end
+	for _, pet in ipairs(sortedOwnedPets(snapshot.Pets)) do
+		inventoryOrder += 1
+		local tile = current.PetTemplate:Clone()
+		configureTile(
+			tile,
+			pet,
+			equipped[pet.Uid] == true,
+			inventoryOrder,
+			InventoryConfig.RuntimePetTilePrefix
+		)
+		tile.Parent = current.PetInventory
 	end
 
 	current.EquipLabel.Text = string.format(
