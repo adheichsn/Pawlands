@@ -601,6 +601,10 @@ local function refresh()
 		return
 	end
 
+	if activeCue and not activeCue.Parent then
+		clearCue()
+	end
+
 	if activeCue then
 		if activeMode ~= context.Mode
 			or activeContextKey ~= context.Key
@@ -688,6 +692,14 @@ function TutorialCueController.Start()
 			task.defer(refresh)
 		elseif child.Name == InventoryConfig.GuiName or child.Name == InventoryConfig.HudGuiName then
 			task.defer(refresh)
+		end
+	end))
+	table.insert(connections, playerGui.ChildRemoved:Connect(function(child)
+		if child.Name == TutorialConfig.Cue.GuiName then
+			clearCue()
+			refs = nil
+			authoredGuiEnabled = nil
+			authoredGuiDisplayOrder = nil
 		end
 	end))
 	table.insert(connections, playerGui.DescendantAdded:Connect(function(descendant)

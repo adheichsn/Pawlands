@@ -4,6 +4,7 @@ return table.freeze({
 	GoalAttributeName = "PawlandsTutorialGoal",
 	CombatEligibleAttributeName = "PawlandsTutorialCombatEligible",
 	InputModeAttributeName = "PawlandsTutorialInputMode",
+	StarterPetHitConfirmedAttributeName = "PawlandsTutorialStarterPetHitConfirmed",
 
 	Stages = table.freeze({
 		NotStarted = "NotStarted",
@@ -18,6 +19,8 @@ return table.freeze({
 		ChooseStarterPet = "ChooseStarterPet",
 		EquipStarterPet = "EquipStarterPet",
 		PetCombatReady = "PetCombatReady",
+		LearnPetCombat = "LearnPetCombat",
+		PetInCombat = "PetInCombat",
 		Completed = "Completed",
 	}),
 
@@ -56,6 +59,8 @@ return table.freeze({
 	SprintLessonRequiredSeconds = 0.35,
 	AttackLessonInitialSlimeCount = 1,
 	SoloCombatSlimeCount = 3,
+	PetCombatInitialSlimeCount = 1,
+	PetCombatSlimeCount = 3,
 	RequiredAttackActionType = "M1",
 	CombatExitLeewayStuds = 8,
 	CombatExitGraceSeconds = 0.60,
@@ -104,4 +109,5 @@ return table.freeze({
 	CombatHintKeyboard = "ATTACK: Click to attack the Slime",
 	CombatHintGamepad = "ATTACK: Press RT to attack the Slime",
 	CombatHintTouch = "ATTACK: Tap Attack to strike",
+	PetCombatHint = "Pets attack nearby enemies automatically.",
 })

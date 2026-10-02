@@ -24,6 +24,8 @@ local function tutorialStartNode(player)
 		return "EquipStarterPetReminder"
 	elseif stage == TutorialConfig.Stages.PetCombatReady then
 		return "PetCombatReadyReminder"
+	elseif stage == TutorialConfig.Stages.LearnPetCombat or stage == TutorialConfig.Stages.PetInCombat then
+		return "PetCombatReminder"
 	elseif stage == TutorialConfig.Stages.Completed then
 		return "Completed"
 	end
@@ -103,7 +105,10 @@ local byId = {
 				Text = "Your new companion is waiting in your Inventory. Equip your Pet when you're ready.",
 			},
 			PetCombatReadyReminder = {
-				Text = "Great. Your companion is ready. We'll train together next.",
+				Text = "Great. Head back to the training area and let your Pet fight beside you.",
+			},
+			PetCombatReminder = {
+				Text = "Your Pet attacks nearby Slimes automatically. Finish the training together.",
 			},
 			Completed = {
 				Text = "Good work. You're ready for the next step of your adventure.",

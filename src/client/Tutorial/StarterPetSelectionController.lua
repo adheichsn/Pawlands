@@ -245,6 +245,18 @@ local function bindPlayerGui()
 			end)
 		end
 	end))
+	table.insert(connections, playerGui.ChildRemoved:Connect(function(child)
+		if child.Name ~= TutorialConfig.StarterPetSelectionGuiName then
+			return
+		end
+		disconnect(uiConnections)
+		refs = nil
+		pending = false
+		selectedSpecies = nil
+		-- Never leave movement locked behind a missing modal. If Roblox/Studio
+		-- recreates the authored GUI, ChildAdded will bind it again for the same stage.
+		InteractionLock.Set("StarterPetSelection", false)
+	end))
 end
 
 function StarterPetSelectionController.Start()

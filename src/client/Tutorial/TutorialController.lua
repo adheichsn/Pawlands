@@ -257,6 +257,8 @@ local function renderGuidance()
 		else
 			text = TutorialConfig.CombatHintKeyboard
 		end
+	elseif stage == TutorialConfig.Stages.LearnPetCombat then
+		text = TutorialConfig.PetCombatHint
 	end
 	if text then
 		TextNotificationController.ShowText(TutorialConfig.NotificationKey, text)
@@ -311,6 +313,9 @@ local function renderTracker()
 		or stage == TutorialConfig.Stages.InCombat
 		or stage == TutorialConfig.Stages.ReturnToAlex
 		or stage == TutorialConfig.Stages.EquipStarterPet
+		or stage == TutorialConfig.Stages.PetCombatReady
+		or stage == TutorialConfig.Stages.LearnPetCombat
+		or stage == TutorialConfig.Stages.PetInCombat
 	)
 	refs.Gui.Enabled = visible
 	if not visible then
@@ -351,6 +356,27 @@ local function renderTracker()
 			refs.Progress.Visible = false
 		end
 		setBar(0)
+	elseif stage == TutorialConfig.Stages.PetCombatReady then
+		setObjectiveText(TutorialConfig.GoToZonePrefix, TutorialConfig.GoToZoneItem)
+		if refs.Progress then
+			refs.Progress.Visible = false
+		end
+		setBar(0)
+	elseif stage == TutorialConfig.Stages.LearnPetCombat then
+		setObjectiveText(TutorialConfig.CombatPrefix, TutorialConfig.CombatItem)
+		if refs.Progress then
+			refs.Progress.Visible = false
+		end
+		setBar(0)
+	elseif stage == TutorialConfig.Stages.PetInCombat then
+		local current = math.max(0, tonumber(player:GetAttribute(TutorialConfig.ProgressAttributeName)) or 0)
+		local goal = math.max(1, tonumber(player:GetAttribute(TutorialConfig.GoalAttributeName)) or 1)
+		setObjectiveText(TutorialConfig.CombatPrefix, TutorialConfig.CombatItem)
+		if refs.Progress then
+			refs.Progress.Text = string.format("%d / %d", math.min(current, goal), goal)
+			refs.Progress.Visible = true
+		end
+		setBar(current / goal)
 	end
 end
 

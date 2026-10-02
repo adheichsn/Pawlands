@@ -6,6 +6,8 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local TutorialConfig = require(Shared.Config.Tutorial)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
+local PetPartyConfig = require(Shared.Config.PetParty)
+local PartyCodec = require(Shared.Pets.PartyCodec)
 
 local TutorialService = {}
 local started = false
@@ -25,6 +27,16 @@ local waveDefeated = 0
 local waveSpawned = 0
 local waveExpanded = false
 local waveExpansionStarted = false
+local waveMode = nil
+local wavePlannedCount = 0
+local waveStartInProgress = false
+local waveGenerationCounter = 0
+local activeWaveGeneration = nil
+
+local WAVE_MODES = table.freeze({
+	Player = "Player",
+	Pet = "Pet",
+})
 
 local function stageOf(player)
 	local stage = player:GetAttribute(TutorialConfig.StageAttributeName)
@@ -60,9 +72,10 @@ end
 
 local function setStage(player, stage)
 	player:SetAttribute(TutorialConfig.StageAttributeName, stage)
-	local combatEligible = stage == TutorialConfig.Stages.GoToZone
-		or stage == TutorialConfig.Stages.LearnAttack
+	local combatEligible = stage == TutorialConfig.Stages.LearnAttack
 		or stage == TutorialConfig.Stages.InCombat
+		or stage == TutorialConfig.Stages.LearnPetCombat
+		or stage == TutorialConfig.Stages.PetInCombat
 	player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, combatEligible)
 	resetOnboardingProgress(player)
 end
@@ -70,6 +83,27 @@ end
 local function setProgress(player, current, goal)
 	player:SetAttribute(TutorialConfig.ProgressAttributeName, math.max(0, math.floor(current or 0)))
 	player:SetAttribute(TutorialConfig.GoalAttributeName, math.max(0, math.floor(goal or 0)))
+end
+
+local function starterPetHitConfirmed(player)
+	return player:GetAttribute(TutorialConfig.StarterPetHitConfirmedAttributeName) == true
+end
+
+local function setStarterPetHitConfirmed(player, confirmed)
+	player:SetAttribute(TutorialConfig.StarterPetHitConfirmedAttributeName, confirmed == true)
+end
+
+local function starterPetIsEquipped(player)
+	local starterUid = player:GetAttribute(TutorialConfig.StarterPetUidAttributeName)
+	if type(starterUid) ~= "string" or starterUid == "" then
+		return false
+	end
+	for _, uid in ipairs(PartyCodec.decode(player:GetAttribute(PetPartyConfig.AttributeName))) do
+		if uid == starterUid then
+			return true
+		end
+	end
+	return false
 end
 
 local function ensureInputRemote()
@@ -99,13 +133,17 @@ end
 
 local function bindPlayer(player)
 	local existingStage = stageOf(player)
-	if player:GetAttribute(TutorialConfig.StageAttributeName) == nil
-		or existingStage == TutorialConfig.Stages.NotStarted
-	then
-		setStage(player, TutorialConfig.Stages.LearnMove)
-	else
-		setStage(player, existingStage)
-	end
+	local state = onboardingState(player)
+	state.AttackLessonCompleted = existingStage == TutorialConfig.Stages.InCombat
+		or existingStage == TutorialConfig.Stages.ReturnToAlex
+		or existingStage == TutorialConfig.Stages.SoloComplete
+		or existingStage == TutorialConfig.Stages.ChooseStarterPet
+		or existingStage == TutorialConfig.Stages.EquipStarterPet
+		or existingStage == TutorialConfig.Stages.PetCombatReady
+		or existingStage == TutorialConfig.Stages.LearnPetCombat
+		or existingStage == TutorialConfig.Stages.PetInCombat
+		or existingStage == TutorialConfig.Stages.Completed
+
 	if player:GetAttribute(TutorialConfig.ProgressAttributeName) == nil then
 		player:SetAttribute(TutorialConfig.ProgressAttributeName, 0)
 	end
@@ -113,22 +151,65 @@ local function bindPlayer(player)
 		player:SetAttribute(TutorialConfig.GoalAttributeName, 0)
 	end
 	player:SetAttribute(TutorialConfig.InputModeAttributeName, "")
-	local state = onboardingState(player)
-	local stage = stageOf(player)
-	state.AttackLessonCompleted = stage == TutorialConfig.Stages.InCombat
-		or stage == TutorialConfig.Stages.ReturnToAlex
-		or stage == TutorialConfig.Stages.SoloComplete
-		or stage == TutorialConfig.Stages.ChooseStarterPet
-		or stage == TutorialConfig.Stages.EquipStarterPet
-		or stage == TutorialConfig.Stages.PetCombatReady
-		or stage == TutorialConfig.Stages.Completed
+
+	local petHitAttribute = player:GetAttribute(TutorialConfig.StarterPetHitConfirmedAttributeName)
+	if existingStage == TutorialConfig.Stages.PetInCombat
+		or existingStage == TutorialConfig.Stages.Completed
+	then
+		setStarterPetHitConfirmed(player, true)
+	elseif existingStage == TutorialConfig.Stages.ChooseStarterPet
+		or existingStage == TutorialConfig.Stages.EquipStarterPet
+		or existingStage == TutorialConfig.Stages.LearnPetCombat
+	then
+		-- These stages are still before the automatic Pet-combat gate. A stale true
+		-- checkpoint here would incorrectly skip the exact starter-Pet hit lesson.
+		setStarterPetHitConfirmed(player, false)
+	elseif petHitAttribute == nil then
+		setStarterPetHitConfirmed(player, false)
+	end
+
+	if player:GetAttribute(TutorialConfig.StageAttributeName) == nil
+		or existingStage == TutorialConfig.Stages.NotStarted
+	then
+		setStage(player, TutorialConfig.Stages.LearnMove)
+	elseif existingStage == TutorialConfig.Stages.LearnAttack then
+		-- Active encounter state is runtime-only. Re-enter through the travel stage
+		-- so a service/script restart cannot strand the Player without a wave.
+		state.AttackLessonCompleted = false
+		setProgress(player, 0, 0)
+		setStage(player, TutorialConfig.Stages.GoToZone)
+	elseif existingStage == TutorialConfig.Stages.InCombat then
+		state.AttackLessonCompleted = true
+		setProgress(player, 0, 0)
+		setStage(player, TutorialConfig.Stages.GoToZone)
+	elseif existingStage == TutorialConfig.Stages.LearnPetCombat then
+		setStarterPetHitConfirmed(player, false)
+		setProgress(player, 0, 0)
+		setStage(player, TutorialConfig.Stages.PetCombatReady)
+	elseif existingStage == TutorialConfig.Stages.PetInCombat then
+		setStarterPetHitConfirmed(player, true)
+		setProgress(player, 0, 0)
+		setStage(player, TutorialConfig.Stages.PetCombatReady)
+	else
+		setStage(player, existingStage)
+	end
 end
 
-local function activeParticipants()
+local function modeForActiveStage(stage)
+	if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
+		return WAVE_MODES.Player
+	end
+	if stage == TutorialConfig.Stages.LearnPetCombat or stage == TutorialConfig.Stages.PetInCombat then
+		return WAVE_MODES.Pet
+	end
+	return nil
+end
+
+local function activeParticipants(mode)
 	local count = 0
 	for _, player in ipairs(Players:GetPlayers()) do
-		local stage = stageOf(player)
-		if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
+		local playerMode = modeForActiveStage(stageOf(player))
+		if playerMode and (mode == nil or playerMode == mode) then
 			count += 1
 		end
 	end
@@ -142,6 +223,10 @@ local function clearWaveState(cancelRuntime)
 	waveSpawned = 0
 	waveExpanded = false
 	waveExpansionStarted = false
+	waveMode = nil
+	wavePlannedCount = 0
+	waveStartInProgress = false
+	activeWaveGeneration = nil
 	if cancelRuntime and slimeMovementService then
 		slimeMovementService.CancelTutorialEncounter()
 	end
@@ -156,12 +241,28 @@ local function prepareCombatRetry(player, previousStage)
 	setStage(player, TutorialConfig.Stages.GoToZone)
 end
 
+local function preparePetCombatRetry(player, previousStage)
+	if previousStage == TutorialConfig.Stages.PetInCombat then
+		setStarterPetHitConfirmed(player, true)
+	elseif previousStage == TutorialConfig.Stages.LearnPetCombat then
+		setStarterPetHitConfirmed(player, false)
+	end
+	setProgress(player, 0, 0)
+	setStage(player, TutorialConfig.Stages.PetCombatReady)
+end
+
 local function resetActiveCombatForRecovery()
 	local recovered = false
+	local recoveringMode = waveMode
 	for _, player in ipairs(Players:GetPlayers()) do
 		local stage = stageOf(player)
-		if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
-			prepareCombatRetry(player, stage)
+		local playerMode = modeForActiveStage(stage)
+		if playerMode == recoveringMode then
+			if playerMode == WAVE_MODES.Pet then
+				preparePetCombatRetry(player, stage)
+			else
+				prepareCombatRetry(player, stage)
+			end
 			recovered = true
 		end
 	end
@@ -173,13 +274,32 @@ local function completeWave()
 	if not waveActive then
 		return
 	end
+	local completingMode = waveMode
 	waveActive = false
+	waveMode = nil
+	wavePlannedCount = 0
+	waveExpanded = false
+	waveExpansionStarted = false
+	waveStartInProgress = false
+	activeWaveGeneration = nil
 	for _, player in ipairs(Players:GetPlayers()) do
 		local stage = stageOf(player)
-		if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
+		if completingMode == WAVE_MODES.Player
+			and (stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat)
+		then
 			onboardingState(player).AttackLessonCompleted = true
 			setProgress(player, waveGoal, waveGoal)
 			setStage(player, TutorialConfig.Stages.ReturnToAlex)
+		elseif completingMode == WAVE_MODES.Pet then
+			if stage == TutorialConfig.Stages.PetInCombat then
+				setProgress(player, waveGoal, waveGoal)
+				setStage(player, TutorialConfig.Stages.Completed)
+			elseif stage == TutorialConfig.Stages.LearnPetCombat then
+				-- Shared tutorial encounters must never let another Player's Pet satisfy
+				-- this Player's exact starter-Pet hit requirement. Retry only the
+				-- participants who never produced their own confirmed starter hit.
+				preparePetCombatRetry(player, stage)
+			end
 		end
 	end
 end
@@ -187,7 +307,11 @@ end
 local function updateCombatProgress()
 	for _, player in ipairs(Players:GetPlayers()) do
 		local stage = stageOf(player)
-		if stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat then
+		if waveMode == WAVE_MODES.Player
+			and (stage == TutorialConfig.Stages.LearnAttack or stage == TutorialConfig.Stages.InCombat)
+		then
+			setProgress(player, waveDefeated, waveGoal)
+		elseif waveMode == WAVE_MODES.Pet and stage == TutorialConfig.Stages.PetInCombat then
 			setProgress(player, waveDefeated, waveGoal)
 		end
 	end
@@ -198,7 +322,7 @@ local function expandCombatWave()
 		return
 	end
 	waveExpansionStarted = true
-	local remaining = math.max(0, TutorialConfig.SoloCombatSlimeCount - waveSpawned)
+	local remaining = math.max(0, wavePlannedCount - waveSpawned)
 	if remaining <= 0 then
 		waveExpanded = true
 		waveExpansionStarted = false
@@ -222,8 +346,17 @@ local function expandCombatWave()
 	end
 end
 
+local function isCurrentWaveModel(model)
+	local record = watchedSlimes[model]
+	return waveActive
+		and activeWaveGeneration ~= nil
+		and record ~= nil
+		and record.WaveGeneration == activeWaveGeneration
+		and model:GetAttribute("TutorialEncounter") == true
+end
+
 local function onConfirmedPlayerHit(model)
-	if not waveActive or model:GetAttribute("TutorialEncounter") ~= true then
+	if waveMode ~= WAVE_MODES.Player or not isCurrentWaveModel(model) then
 		return
 	end
 	if tostring(model:GetAttribute("LastPlayerHitActionType") or "") ~= TutorialConfig.RequiredAttackActionType then
@@ -241,10 +374,55 @@ local function onConfirmedPlayerHit(model)
 	expandCombatWave()
 end
 
-local function onSlimeDefeated(model)
-	if not waveActive or model:GetAttribute("TutorialDefeatCounted") == true then
+local function onConfirmedPetHit(model)
+	if waveMode ~= WAVE_MODES.Pet or not isCurrentWaveModel(model) then
 		return
 	end
+	if tostring(model:GetAttribute("LastHitSourceType") or "") ~= "Pet" then
+		return
+	end
+
+	local userId = tonumber(model:GetAttribute("LastHitUserId")) or 0
+	local player = userId > 0 and Players:GetPlayerByUserId(userId) or nil
+	if not player or stageOf(player) ~= TutorialConfig.Stages.LearnPetCombat then
+		return
+	end
+
+	local starterUid = tostring(player:GetAttribute(TutorialConfig.StarterPetUidAttributeName) or "")
+	local sourceUid = tostring(model:GetAttribute("LastHitSourceUid") or "")
+	if starterUid == ""
+		or sourceUid ~= starterUid
+		or player:GetAttribute(TutorialConfig.StarterPetGrantedAttributeName) ~= true
+	then
+		return
+	end
+
+	-- HitSerial is published only after authoritative SlimeHealth damage metadata is
+	-- committed, so this transition cannot be satisfied by a client-only attack cue.
+	setStarterPetHitConfirmed(player, true)
+	setStage(player, TutorialConfig.Stages.PetInCombat)
+	setProgress(player, waveDefeated, waveGoal)
+	expandCombatWave()
+end
+
+local function onSlimeDefeated(model)
+	if not isCurrentWaveModel(model) or model:GetAttribute("TutorialDefeatCounted") == true then
+		return
+	end
+
+	if waveMode == WAVE_MODES.Pet and not waveExpanded then
+		-- The first Pet lesson Slime can still be damaged by the Player. If it dies
+		-- before this Player's exact starter UID lands a valid Pet hit, restart the
+		-- lesson instead of leaving a zero-target softlock.
+		for _, player in ipairs(Players:GetPlayers()) do
+			if stageOf(player) == TutorialConfig.Stages.LearnPetCombat then
+				preparePetCombatRetry(player, TutorialConfig.Stages.LearnPetCombat)
+			end
+		end
+		clearWaveState(true)
+		return
+	end
+
 	model:SetAttribute("TutorialDefeatCounted", true)
 	waveDefeated = math.min(waveGoal, waveDefeated + 1)
 	updateCombatProgress()
@@ -264,6 +442,12 @@ local function unwatchSlime(model)
 	if record.PlayerHit then
 		record.PlayerHit:Disconnect()
 	end
+	if record.PetHit then
+		record.PetHit:Disconnect()
+	end
+	if record.TutorialEncounter then
+		record.TutorialEncounter:Disconnect()
+	end
 	if record.Ancestry then
 		record.Ancestry:Disconnect()
 	end
@@ -274,9 +458,24 @@ local function watchSlime(model)
 	if watchedSlimes[model] or not model:IsA("Model") then
 		return
 	end
-	local record = {}
+	local record = {
+		WaveGeneration = model:GetAttribute("TutorialEncounter") == true and activeWaveGeneration or nil,
+	}
+	watchedSlimes[model] = record
+
+	record.TutorialEncounter = model:GetAttributeChangedSignal("TutorialEncounter"):Connect(function()
+		if model:GetAttribute("TutorialEncounter") == true
+			and record.WaveGeneration == nil
+			and activeWaveGeneration ~= nil
+		then
+			record.WaveGeneration = activeWaveGeneration
+		end
+	end)
 	record.PlayerHit = model:GetAttributeChangedSignal("PlayerHitSerial"):Connect(function()
 		onConfirmedPlayerHit(model)
+	end)
+	record.PetHit = model:GetAttributeChangedSignal("HitSerial"):Connect(function()
+		onConfirmedPetHit(model)
 	end)
 	record.Defeated = model:GetAttributeChangedSignal("Defeated"):Connect(function()
 		if model:GetAttribute("Defeated") == true then
@@ -288,7 +487,6 @@ local function watchSlime(model)
 			unwatchSlime(model)
 		end
 	end)
-	watchedSlimes[model] = record
 	if model:GetAttribute("Defeated") == true then
 		onSlimeDefeated(model)
 	end
@@ -367,28 +565,38 @@ local function updateOnboarding(player, dt)
 	end
 end
 
-local function beginWave(initialCount)
+local function beginWave(initialCount, plannedCount, mode)
 	if waveActive then
-		return true
+		if waveMode == mode then
+			return true
+		end
+		return false, "Another tutorial combat lesson is active."
 	end
-	local requestedInitial = math.clamp(
-		math.floor(tonumber(initialCount) or TutorialConfig.AttackLessonInitialSlimeCount),
-		1,
-		TutorialConfig.SoloCombatSlimeCount
-	)
-	local ok, spawnedOrReason = slimeMovementService.BeginTutorialEncounter(
-		requestedInitial,
-		TutorialConfig.SoloCombatSlimeCount
-	)
+	if waveStartInProgress then
+		return false, "Tutorial encounter start is already in progress."
+	end
+
+	local planned = math.max(1, math.floor(tonumber(plannedCount) or 1))
+	local requestedInitial = math.clamp(math.floor(tonumber(initialCount) or 1), 1, planned)
+	waveStartInProgress = true
+	waveGenerationCounter += 1
+	activeWaveGeneration = waveGenerationCounter
+
+	local ok, spawnedOrReason = slimeMovementService.BeginTutorialEncounter(requestedInitial, planned)
 	if not ok then
+		waveStartInProgress = false
+		activeWaveGeneration = nil
 		return false, spawnedOrReason
 	end
 	waveActive = true
+	waveMode = mode
+	wavePlannedCount = planned
 	waveSpawned = math.max(1, tonumber(spawnedOrReason) or 0)
 	waveDefeated = 0
-	waveExpanded = requestedInitial >= TutorialConfig.SoloCombatSlimeCount
-	waveGoal = waveExpanded and waveSpawned or TutorialConfig.SoloCombatSlimeCount
+	waveExpanded = requestedInitial >= planned
+	waveGoal = waveExpanded and waveSpawned or planned
 	waveExpansionStarted = false
+	waveStartInProgress = false
 	updateCombatProgress()
 	return true
 end
@@ -397,26 +605,45 @@ local function updateCombatPresence(dt)
 	local resetAny = false
 	for _, player in ipairs(Players:GetPlayers()) do
 		local stage = stageOf(player)
-		if stage ~= TutorialConfig.Stages.LearnAttack and stage ~= TutorialConfig.Stages.InCombat then
+		local playerMode = modeForActiveStage(stage)
+		if not playerMode or (waveMode and playerMode ~= waveMode) then
 			continue
 		end
 
 		local state = onboardingState(player)
+		if playerMode == WAVE_MODES.Pet and not starterPetIsEquipped(player) then
+			-- A tiny mutation race can exist before the combat roster guard observes the
+			-- encounter. Never leave the Player inside an automatic-Pet lesson without
+			-- the exact starter Pet that the lesson is teaching.
+			setStarterPetHitConfirmed(player, false)
+			setProgress(player, 0, 0)
+			setStage(player, TutorialConfig.Stages.EquipStarterPet)
+			resetAny = true
+			continue
+		end
+
 		local character = player.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		local root = character and character:FindFirstChild("HumanoidRootPart")
 
-		if humanoid and humanoid.Health <= 0 then
-			prepareCombatRetry(player, stage)
+		local function retry()
+			if playerMode == WAVE_MODES.Pet then
+				preparePetCombatRetry(player, stage)
+			else
+				prepareCombatRetry(player, stage)
+			end
 			resetAny = true
+		end
+
+		if humanoid and humanoid.Health <= 0 then
+			retry()
 			continue
 		end
 
 		if not root or not root:IsA("BasePart") then
 			state.MissingCharacterSeconds += dt
 			if state.MissingCharacterSeconds >= TutorialConfig.CombatMissingCharacterGraceSeconds then
-				prepareCombatRetry(player, stage)
-				resetAny = true
+				retry()
 			end
 			continue
 		end
@@ -428,25 +655,38 @@ local function updateCombatPresence(dt)
 		else
 			state.OutsideCombatSeconds += dt
 			if state.OutsideCombatSeconds >= TutorialConfig.CombatExitGraceSeconds then
-				prepareCombatRetry(player, stage)
-				resetAny = true
+				retry()
 			end
 		end
 	end
 
-	if resetAny and activeParticipants() <= 0 and waveActive then
+	if resetAny and waveActive and activeParticipants(waveMode) <= 0 then
 		clearWaveState(true)
 	end
 end
 
 local function reconcileWaveIntegrity()
-	if not waveActive or not slimeMovementService.GetTutorialEncounterSnapshot then
+	if not slimeMovementService.GetTutorialEncounterSnapshot then
 		return
 	end
 	local snapshot = slimeMovementService.GetTutorialEncounterSnapshot()
 	if type(snapshot) ~= "table" then
 		return
 	end
+
+	if not waveActive then
+		if snapshot.Active == true then
+			-- Local tutorial state can be rebuilt after a script/service restart, but a
+			-- leftover runtime encounter cannot safely be adopted because its stage/gate
+			-- ownership is unknown. Clear it once, then let travel stages start cleanly.
+			slimeMovementService.CancelTutorialEncounter()
+			if RunService:IsStudio() then
+				print("[Pawlands Tutorial] Cleared orphaned tutorial encounter runtime.")
+			end
+		end
+		return
+	end
+
 	local expectedLive = math.max(0, waveSpawned - waveDefeated)
 	local liveCount = math.max(0, tonumber(snapshot.LiveCount) or 0)
 	if snapshot.Active ~= true or liveCount ~= expectedLive then
@@ -463,34 +703,67 @@ end
 
 local function updateZoneEntries()
 	for _, player in ipairs(Players:GetPlayers()) do
-		if stageOf(player) == TutorialConfig.Stages.GoToZone then
-			local root = getAliveRoot(player)
-			if root and slimeMovementService.ContainsPosition(root.Position) then
-				local state = onboardingState(player)
-				local attackLessonCompleted = state.AttackLessonCompleted == true
-				local initialCount = attackLessonCompleted
-					and TutorialConfig.SoloCombatSlimeCount
-					or TutorialConfig.AttackLessonInitialSlimeCount
-				local ok = beginWave(initialCount)
-				if ok then
-					if attackLessonCompleted then
-						setStage(player, TutorialConfig.Stages.InCombat)
-						if not waveExpanded then
-							expandCombatWave()
-						end
-					else
-						-- Every first-time participant gets the contextual attack lesson. The
-						-- shared encounter may already be expanded by another Player, but this
-						-- Player's hint stays until their own confirmed direct M1 lands.
-						setStage(player, TutorialConfig.Stages.LearnAttack)
+		local stage = stageOf(player)
+		local root = getAliveRoot(player)
+		if not root or not slimeMovementService.ContainsPosition(root.Position) then
+			continue
+		end
+
+		if stage == TutorialConfig.Stages.GoToZone
+			and (not waveActive or waveMode == WAVE_MODES.Player)
+		then
+			local state = onboardingState(player)
+			local attackLessonCompleted = state.AttackLessonCompleted == true
+			local initialCount = attackLessonCompleted
+				and TutorialConfig.SoloCombatSlimeCount
+				or TutorialConfig.AttackLessonInitialSlimeCount
+			local ok = beginWave(initialCount, TutorialConfig.SoloCombatSlimeCount, WAVE_MODES.Player)
+			if ok then
+				if attackLessonCompleted then
+					setStage(player, TutorialConfig.Stages.InCombat)
+					if not waveExpanded then
+						expandCombatWave()
+					end
+				else
+					-- Every first-time participant gets the contextual attack lesson. The
+					-- shared encounter may already be expanded by another Player, but this
+					-- Player's hint stays until their own confirmed direct M1 lands.
+					setStage(player, TutorialConfig.Stages.LearnAttack)
+				end
+				setProgress(player, waveDefeated, waveGoal)
+			end
+		elseif stage == TutorialConfig.Stages.PetCombatReady
+			and (not waveActive or waveMode == WAVE_MODES.Pet)
+		then
+			if not starterPetIsEquipped(player) then
+				setStarterPetHitConfirmed(player, false)
+				setProgress(player, 0, 0)
+				setStage(player, TutorialConfig.Stages.EquipStarterPet)
+				continue
+			end
+			local hitCheckpoint = starterPetHitConfirmed(player)
+			local initialCount = hitCheckpoint
+				and TutorialConfig.PetCombatSlimeCount
+				or TutorialConfig.PetCombatInitialSlimeCount
+			local ok = beginWave(initialCount, TutorialConfig.PetCombatSlimeCount, WAVE_MODES.Pet)
+			if ok then
+				if hitCheckpoint then
+					setStage(player, TutorialConfig.Stages.PetInCombat)
+					if not waveExpanded then
+						expandCombatWave()
 					end
 					setProgress(player, waveDefeated, waveGoal)
+				else
+					setStage(player, TutorialConfig.Stages.LearnPetCombat)
+					-- The visible 0/N kill counter starts only after this Player's exact
+					-- starter UID lands a valid server-confirmed Pet hit.
+					setProgress(player, 0, 0)
 				end
 			end
 		end
 	end
 
-	if waveActive and activeParticipants() <= 0 then
+	if waveActive and activeParticipants(waveMode) <= 0 then
 		clearWaveState(true)
 	end
 end
@@ -576,6 +849,7 @@ function TutorialService.CompleteStarterPetEquip(player, uid)
 	if player:GetAttribute(TutorialConfig.StarterPetGrantedAttributeName) ~= true then
 		return false
 	end
+	setStarterPetHitConfirmed(player, false)
 	setStage(player, TutorialConfig.Stages.PetCombatReady)
 	setProgress(player, 0, 0)
 	return true
@@ -601,7 +875,7 @@ function TutorialService.Start(slimeService)
 		player:SetAttribute(TutorialConfig.CombatEligibleAttributeName, false)
 		onboardingByPlayer[player] = nil
 		task.defer(function()
-			if started and waveActive and activeParticipants() <= 0 then
+			if started and waveActive and activeParticipants(waveMode) <= 0 then
 				clearWaveState(true)
 			end
 		end)
@@ -665,6 +939,9 @@ function TutorialService.Stop()
 	end
 	table.clear(onboardingByPlayer)
 	accumulator = 0
+	waveGenerationCounter = 0
+	activeWaveGeneration = nil
+	waveStartInProgress = false
 	inputRemote = nil
 	slimeMovementService = nil
 end

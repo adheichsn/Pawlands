@@ -14,6 +14,7 @@ local InventoryController = {}
 local player = Players.LocalPlayer
 local started = false
 local connections = {}
+local uiConnections = {}
 local refs = nil
 local remote = nil
 local snapshot = nil
@@ -24,11 +25,16 @@ local warnedMissing = false
 local partyLockNoticeSerial = 0
 local favoriteStrokeDefaults = nil
 
-local function disconnectAll()
-	for _, connection in ipairs(connections) do
+local function disconnect(list)
+	for _, connection in ipairs(list) do
 		connection:Disconnect()
 	end
-	table.clear(connections)
+	table.clear(list)
+end
+
+local function disconnectAll()
+	disconnect(connections)
+	disconnect(uiConnections)
 end
 
 local function child(parent, name, className)
@@ -592,9 +598,10 @@ local function prepareAuthoredUi(current)
 	-- below Roblox's top-bar inset. No GUI objects are created for this.
 	current.Gui.IgnoreGuiInset = true
 
-	-- HUD is Studio-owned but originally resets on respawn. Keep this exact cloned
-	-- PlayerGui instance so the bound InventoryButton does not become stale.
+	-- Keep the already-bound Studio-authored Inventory + HUD instances across
+	-- character respawns. Runtime rebind below still handles an external replacement.
 	current.Hud.ResetOnSpawn = false
+	current.Gui.ResetOnSpawn = false
 	current.Gui.Enabled = false
 	current.PetTemplate.Visible = false
 	current.AddFrame.Visible = false
@@ -623,27 +630,36 @@ local function prepareAuthoredUi(current)
 end
 
 local function bind(current)
-	table.insert(connections, current.HudKeyButton.Activated:Connect(openInventory))
-	table.insert(connections, current.CloseButton.Activated:Connect(closeInventory))
-	table.insert(connections, current.SearchBar:GetPropertyChangedSignal("Text"):Connect(applyPageAndSearch))
-	table.insert(connections, current.Favorite.Activated:Connect(function()
+	disconnect(uiConnections)
+	table.insert(uiConnections, current.HudKeyButton.Activated:Connect(openInventory))
+	table.insert(uiConnections, current.CloseButton.Activated:Connect(closeInventory))
+	table.insert(uiConnections, current.SearchBar:GetPropertyChangedSignal("Text"):Connect(applyPageAndSearch))
+	table.insert(uiConnections, current.Favorite.Activated:Connect(function()
 		setFavoriteMode(not favoriteMode)
 	end))
-	table.insert(connections, current.PetsTab.Activated:Connect(function()
+	table.insert(uiConnections, current.PetsTab.Activated:Connect(function()
 		currentPage = "Pets"
 		applyPageAndSearch()
 	end))
-	table.insert(connections, current.ItemsTab.Activated:Connect(function()
+	table.insert(uiConnections, current.ItemsTab.Activated:Connect(function()
 		currentPage = "Items"
 		applyPageAndSearch()
 	end))
+end
 
-	local partyAttribute = PetPartyConfig.AttributeName
-	table.insert(connections, player:GetAttributeChangedSignal(partyAttribute):Connect(function()
-		if current.Gui.Enabled then
-			refreshSnapshot()
-		end
-	end))
+local function rebindUi()
+	if not started then
+		return false
+	end
+	disconnect(uiConnections)
+	refs = nil
+	local current = resolveRefs()
+	if not current then
+		return false
+	end
+	prepareAuthoredUi(current)
+	bind(current)
+	return true
 end
 
 function InventoryController.Start()
@@ -663,22 +679,41 @@ function InventoryController.Start()
 			if not started or warnedMissing then
 				return
 			end
-			local delayed = resolveRefs()
-			if delayed then
-				prepareAuthoredUi(delayed)
-				bind(delayed)
-			else
+			if not rebindUi() then
 				warnedMissing = true
 				warn("[Pawlands Inventory] Studio-owned Inventory or HUD InventoryButton hierarchy is missing required runtime anchors.")
 			end
 		end)
 	end
 
+	table.insert(connections, player:GetAttributeChangedSignal(PetPartyConfig.AttributeName):Connect(function()
+		local active = resolveRefs()
+		if active and active.Gui.Enabled then
+			refreshSnapshot()
+		end
+	end))
 	table.insert(connections, player.CharacterRemoving:Connect(closeInventory))
 	table.insert(connections, playerGui.ChildAdded:Connect(function(childGui)
 		if childGui.Name == InventoryConfig.GuiName or childGui.Name == InventoryConfig.HudGuiName then
-			closeInventory()
+			InteractionLock.Set("Inventory", false)
+			refs = nil
+			task.defer(function()
+				if started then
+					rebindUi()
+				end
+			end)
 		end
+	end))
+	table.insert(connections, playerGui.ChildRemoved:Connect(function(childGui)
+		if childGui.Name ~= InventoryConfig.GuiName and childGui.Name ~= InventoryConfig.HudGuiName then
+			return
+		end
+		InteractionLock.Set("Inventory", false)
+		disconnect(uiConnections)
+		refs = nil
+		snapshot = nil
+		currentPage = "Pets"
+		favoriteMode = false
 	end))
 end
 
