@@ -17,6 +17,7 @@ local SlimeLifecycle = require(script.Parent.SlimeLifecycle)
 local SlimeTargeting = require(script.Parent.SlimeTargeting)
 local WorldSlimeDirector = require(script.Parent.WorldSlimeDirector)
 local WorldSlimeMotionRuntime = require(script.Parent.WorldSlimeMotionRuntime)
+local WorldSlimeProfileRuntime = require(script.Parent.WorldSlimeProfileRuntime)
 local WorldSlimeTargetRuntime = require(script.Parent.WorldSlimeTargetRuntime)
 
 local WorldSlimeService = {}
@@ -41,7 +42,11 @@ local function zoneFor(agent)
 end
 
 local function configFor(agent)
-	return agent and agent.Config or MovementConfig
+	return WorldSlimeProfileRuntime.MovementConfigFor(agent) or MovementConfig
+end
+
+local function combatConfigFor(agent)
+	return WorldSlimeProfileRuntime.CombatConfigFor(agent) or CombatConfig
 end
 
 local function runtimeContext()
@@ -49,6 +54,7 @@ local function runtimeContext()
 		Agents = agents,
 		Random = randomObject,
 		CombatConfig = CombatConfig,
+		CombatConfigFor = combatConfigFor,
 		PetCombatService = petCombatService,
 		PetVitalsService = petVitalsService,
 		PetCombatFeedbackService = petCombatFeedbackService,
@@ -81,7 +87,7 @@ local function retireDefeatedAgents(now)
 		local agent = agents[index]
 		if not SlimeHealth.IsAlive(agent.Model) then
 			SlimeAttackScheduler.Withdraw(agent)
-			SlimeAttackRuntime.Cancel(agent, now, CombatConfig)
+			SlimeAttackRuntime.Cancel(agent, now, combatConfigFor(agent))
 			SlimeTargeting.Clear(agent)
 			agent:SetState("Defeated", nil)
 			agent:SetCombatReady(false)
@@ -93,7 +99,7 @@ local function retireDefeatedAgents(now)
 			local lifecycle = SlimeLifecycle.Begin(agent, now, LifecycleConfig, true)
 			lifecycle.RuntimeZone = zoneFor(agent)
 			lifecycle.RuntimeRegionId = agent.RuntimeRegionId
-			lifecycle.MovementConfig = configFor(agent)
+			lifecycle.MovementConfig = agent.Config or MovementConfig
 			agent:Destroy()
 			table.remove(agents, index)
 			table.insert(pendingRespawns, lifecycle)
@@ -122,6 +128,8 @@ local function processPendingRespawns(now)
 		end
 
 		if replacement then
+			local profile = WorldSlimeProfileRuntime.Resolve(replacement.Definition)
+			WorldSlimeProfileRuntime.Attach(replacement, profile)
 			local region = regionById(lifecycle.RuntimeRegionId)
 			if region then
 				WorldSlimeDirector.TagAgent(replacement, region)
@@ -157,7 +165,7 @@ local function pruneOrphanedAgents(now)
 		local model = agent and agent.Model
 		if not model or model.Parent ~= runtimeFolder then
 			pcall(SlimeAttackScheduler.Withdraw, agent)
-			pcall(SlimeAttackRuntime.Cancel, agent, now, CombatConfig)
+			pcall(SlimeAttackRuntime.Cancel, agent, now, combatConfigFor(agent))
 			pcall(SlimeTargeting.Clear, agent)
 			if agent and agent.Visual and agent.Visual.Animation then
 				pcall(function()
@@ -233,8 +241,9 @@ local function spawnInitialPopulation()
 			spec.Definition,
 			visual,
 			spawnPosition,
-			region.MovementConfig
+			spec.MovementConfig or region.MovementConfig
 		)
+		WorldSlimeProfileRuntime.Attach(agent, spec.Profile)
 		WorldSlimeDirector.TagAgent(agent, region)
 		agent:EnterIdle(time(), randomObject)
 		agent:Step(agent.Position, 0, agents, runtimeZone, 0.001)
@@ -308,7 +317,7 @@ function WorldSlimeService.Stop()
 
 	for _, agent in ipairs(agents) do
 		SlimeAttackScheduler.Withdraw(agent)
-		SlimeAttackRuntime.Cancel(agent, time(), CombatConfig)
+		SlimeAttackRuntime.Cancel(agent, time(), combatConfigFor(agent))
 		SlimeTargeting.Clear(agent)
 		agent:Destroy()
 		SlimeFactory.Destroy(agent.Visual)

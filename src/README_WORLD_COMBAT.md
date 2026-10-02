@@ -41,7 +41,7 @@ StonewoodIsland > Combat > Zones > Zones > Region01/02/03
 - The initial QA population is 8 total Slimes distributed across the three authored regions.
 - A defeated Stonewood Slime uses the existing defeat presentation and respawns continuously after the existing lifecycle delay.
 - Respawn chooses a safe inset position from the same authored region rather than a fixed death location.
-- Stonewood aggro is finite (`24` studs, disengage at `36`) instead of tutorial-wide aggro.
+- Stonewood aggro is finite and profile-driven instead of tutorial-wide aggro. Goopy keeps the `24` / `36` baseline while Fin, Sunset, and Derpy override it through 4A.0.1 world profiles.
 - There are no Coins, Diamonds, Player EXP, Pet EXP, loot, boss, challenge, or chest rewards in this patch.
 
 ## Tutorial freeze
@@ -53,7 +53,7 @@ No TutorialService, tutorial stage, tutorial spawn flow, dialogue flow, cue, arr
 
 1. Join and verify Stonewood creates 8 managed Slimes total.
 2. Verify Slimes are distributed across Region01/02/03 rather than stacked at one Point.
-3. Walk near a Stonewood Slime; it should use the existing notice/chase/engage/attack behavior.
+3. Walk near a Stonewood Slime; it should use the existing notice/chase/engage/attack foundation with its Stonewood species profile applied.
 4. Equip Pets; Pet targeting, Pet damage, Slime-to-Pet targeting, KO/recovery, and Player assist should behave like the existing combat baseline.
 5. Kill a Stonewood Slime; after the normal defeat hold + respawn delay, it should reappear at a safe position in the same region.
 6. Move away beyond disengage range; the Slime should return toward its home area instead of following across the island indefinitely.

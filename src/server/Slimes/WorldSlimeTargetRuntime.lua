@@ -12,6 +12,13 @@ local function withdrawAttackTurn(agent)
 	SlimeAttackScheduler.Withdraw(agent)
 end
 
+local function combatConfigFor(context, agent)
+	if context.CombatConfigFor then
+		return context.CombatConfigFor(agent)
+	end
+	return context.CombatConfig
+end
+
 function WorldSlimeTargetRuntime.GetRoot(player)
 	local character = player.Character
 	if not character then
@@ -72,7 +79,7 @@ end
 
 local function disengage(context, agent, now)
 	withdrawAttackTurn(agent)
-	SlimeAttackRuntime.Cancel(agent, now, context.CombatConfig)
+	SlimeAttackRuntime.Cancel(agent, now, combatConfigFor(context, agent))
 	SlimeTargeting.Clear(agent)
 	local config = context.ConfigFor(agent)
 	if agent:DistanceTo(agent.HomePosition) > config.ReturnHomeDistance then
@@ -114,7 +121,7 @@ local function assignFocus(context, agent, player, now, pressure)
 		context.PetCombatService,
 		context.PetVitalsService,
 		runtimeZone,
-		context.CombatConfig,
+		combatConfigFor(context, agent),
 		pressure,
 		context.Random
 	)
@@ -122,7 +129,7 @@ local function assignFocus(context, agent, player, now, pressure)
 		return nil
 	end
 
-	local changed = SlimeTargeting.Assign(agent, target, now, context.CombatConfig, context.Random)
+	local changed = SlimeTargeting.Assign(agent, target, now, combatConfigFor(context, agent), context.Random)
 	if changed then
 		withdrawAttackTurn(agent)
 		agent.FormationSlot = nil
@@ -130,7 +137,7 @@ local function assignFocus(context, agent, player, now, pressure)
 	end
 	if target.Kind == "Player" then
 		agent.NextTargetReviewAt = now
-			+ math.max(0.1, tonumber(context.CombatConfig.TargetReviewIntervalSeconds) or 0.45)
+			+ math.max(0.1, tonumber(combatConfigFor(context, agent).TargetReviewIntervalSeconds) or 0.45)
 	end
 	SlimeTargeting.AddPressure(pressure, target)
 	return target
@@ -157,7 +164,7 @@ local function currentOrReviewedFocus(context, agent, player, now, pressure)
 
 	if target.Kind == "Pet" and now >= (agent.NextTargetReviewAt or 0) then
 		local takeover = runtimeZone
-			and SlimeTargeting.TryPlayerTakeover(agent, runtimeZone, context.CombatConfig, now)
+			and SlimeTargeting.TryPlayerTakeover(agent, runtimeZone, combatConfigFor(context, agent), now)
 			or nil
 		if takeover then
 			pressure[target.Key] = math.max(0, (pressure[target.Key] or 0) - 1)
@@ -165,7 +172,7 @@ local function currentOrReviewedFocus(context, agent, player, now, pressure)
 				agent,
 				takeover,
 				now,
-				context.CombatConfig,
+				combatConfigFor(context, agent),
 				context.Random
 			)
 			if changed then
@@ -198,7 +205,7 @@ function WorldSlimeTargetRuntime.UpdateStates(context, now)
 	for _, agent in ipairs(context.Agents) do
 		if not SlimeHealth.IsAlive(agent.Model) then
 			withdrawAttackTurn(agent)
-			SlimeAttackRuntime.Cancel(agent, now, context.CombatConfig)
+			SlimeAttackRuntime.Cancel(agent, now, combatConfigFor(context, agent))
 			SlimeTargeting.Clear(agent)
 			agent:SetState("Defeated", nil)
 			agent:SetCombatReady(false)
@@ -220,7 +227,7 @@ function WorldSlimeTargetRuntime.UpdateStates(context, now)
 			if not ownerValid then
 				disengage(context, agent, now)
 			elseif not target then
-				SlimeAttackRuntime.Cancel(agent, now, context.CombatConfig)
+				SlimeAttackRuntime.Cancel(agent, now, combatConfigFor(context, agent))
 				local replacement = assignFocus(
 					context,
 					agent,
@@ -253,7 +260,7 @@ function WorldSlimeTargetRuntime.UpdateStates(context, now)
 			then
 				withdrawAttackTurn(agent)
 				SlimeTargeting.Clear(agent)
-				agent:EnterNotice(owner, now, context.CombatConfig)
+				agent:EnterNotice(owner, now, combatConfigFor(context, agent))
 				continue
 			end
 

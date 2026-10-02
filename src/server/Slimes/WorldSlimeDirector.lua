@@ -6,6 +6,7 @@ local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local WorldSlimeConfig = require(Shared.Config.WorldSlime)
 
 local SlimeZone = require(script.Parent.SlimeZone)
+local WorldSlimeProfileRuntime = require(script.Parent.WorldSlimeProfileRuntime)
 
 local WorldSlimeDirector = {}
 
@@ -121,9 +122,16 @@ function WorldSlimeDirector.BuildSpawnPlan(regions)
 		for localIndex = 1, count do
 			worldIndex += 1
 			local definitionIndex = ((worldIndex - 1) % #SlimeCatalog.Variants) + 1
+			local definition = SlimeCatalog.Variants[definitionIndex]
+			local profile = WorldSlimeProfileRuntime.Resolve(definition)
 			table.insert(plan, {
 				Slot = WorldSlimeConfig.SlotBase + worldIndex,
-				Definition = SlimeCatalog.Variants[definitionIndex],
+				Definition = definition,
+				Profile = profile,
+				MovementConfig = WorldSlimeProfileRuntime.BuildMovementConfig(
+					region.MovementConfig,
+					profile
+				),
 				Region = region,
 				Position = positions[localIndex],
 			})

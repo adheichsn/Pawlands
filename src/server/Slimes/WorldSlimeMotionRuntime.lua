@@ -12,6 +12,13 @@ local function withdrawAttackTurn(agent)
 	SlimeAttackScheduler.Withdraw(agent)
 end
 
+local function combatConfigFor(context, agent)
+	if context.CombatConfigFor then
+		return context.CombatConfigFor(agent)
+	end
+	return context.CombatConfig
+end
+
 local function chaseSpeedFor(context, agent, goal)
 	local config = context.ConfigFor(agent)
 	local distance = agent:DistanceTo(goal)
@@ -163,13 +170,14 @@ function WorldSlimeMotionRuntime.StepAgent(context, agent, formationGoal, now, d
 		return
 	end
 	local config = context.ConfigFor(agent)
+	local combatConfig = combatConfigFor(context, agent)
 
 	if agent.State == "Attack" then
 		SlimeAttackRuntime.Update(
 			agent,
 			now,
 			runtimeZone,
-			context.CombatConfig,
+			combatConfig,
 			function(strike)
 				return resolveStrikeTarget(context, agent, strike)
 			end,
@@ -207,10 +215,10 @@ function WorldSlimeMotionRuntime.StepAgent(context, agent, formationGoal, now, d
 		facingGoal = targetPosition
 		local facingReady = agent:IsFacing(
 			targetPosition,
-			context.CombatConfig.AttackFacingToleranceDegrees
+			combatConfig.AttackFacingToleranceDegrees
 		)
 		if agent.CombatReady and now >= agent.NextAttackAt and facingReady then
-			if SlimeAttackRuntime.Begin(agent, targetContext, now, context.CombatConfig) then
+			if SlimeAttackRuntime.Begin(agent, targetContext, now, combatConfig) then
 				return
 			end
 		else
