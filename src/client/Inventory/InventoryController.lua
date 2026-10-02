@@ -255,9 +255,19 @@ local function resetPlaceholderBadges(current)
 	end
 end
 
-local function bindRuntimeCounts(current, petCount)
-	current.PetCount.Text = string.format(InventoryConfig.OwnedCountTextFormat, math.max(0, petCount or 0))
-	current.ItemCount.Text = InventoryConfig.EmptyItemCountText
+local function bindRuntimeCounts(current, petCount, itemCount)
+	local ownedPets = math.max(0, math.floor(tonumber(petCount) or 0))
+	local usedItemSlots = math.max(0, math.floor(tonumber(itemCount) or 0))
+	current.PetCount.Text = string.format(
+		InventoryConfig.CapacityCountTextFormat,
+		ownedPets,
+		InventoryConfig.PetCapacity
+	)
+	current.ItemCount.Text = string.format(
+		InventoryConfig.CapacityCountTextFormat,
+		usedItemSlots,
+		InventoryConfig.ItemCapacity
+	)
 	resetPlaceholderBadges(current)
 end
 

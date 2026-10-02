@@ -1,6 +1,7 @@
 local Players = game:GetService("Players")
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
 local Catalog = require(Shared.Config.PetCatalog)
+local InventoryConfig = require(Shared.Config.Inventory)
 local Rules = require(Shared.Pets.PartyRules)
 
 local PetInventoryService = {}
@@ -26,6 +27,16 @@ end
 
 local function clonePet(pet)
 	return pet and table.clone(pet) or nil
+end
+
+local function ownedPetCount(state)
+	local count = 0
+	for _, uid in ipairs(state.Order) do
+		if state.Pets[uid] then
+			count += 1
+		end
+	end
+	return count
 end
 
 function PetInventoryService.GetPet(player, uid)
@@ -76,6 +87,9 @@ function PetInventoryService.Grant(player, requestedPet, variant)
 	local definition = petId and Catalog.Pets[petId]
 	if not definition then
 		return nil, "Unknown pet: " .. tostring(requestedPet)
+	end
+	if ownedPetCount(state) >= InventoryConfig.PetCapacity then
+		return nil, string.format("Pet inventory is full (%d/%d).", InventoryConfig.PetCapacity, InventoryConfig.PetCapacity)
 	end
 	state.NextSequence += 1
 	local uid = "p" .. tostring(state.NextSequence)
