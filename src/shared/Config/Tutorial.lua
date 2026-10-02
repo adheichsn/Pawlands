@@ -124,13 +124,33 @@ return table.freeze({
 		PiecePrefix = "Piece",
 
 		DefaultDurationSeconds = 2.6,
-		TitlePopStartSeconds = 0.08,
-		ConfettiBurstStartSeconds = 0.20,
-		ConfettiFadeStartSeconds = 0.92,
-		IntroScale = 0.78,
-		PopScale = 1.08,
-		TitlePopSeconds = 0.16,
-		TitleSettleSeconds = 0.12,
+		MinimumDurationSeconds = 3.05,
+		TitlePopStartSeconds = 0.06,
+		ConfettiBurstStartSeconds = 0.18,
+
+		-- Burst #1 is deliberately short and punchy. Every authored piece is then
+		-- hidden/reset to its corner origin before a wider, higher second launch.
+		FirstWaveDelayScale = 0.80,
+		FirstWaveDurationScale = 0.42,
+		SecondWaveStartSeconds = 0.82,
+		SecondWaveDelayScale = 0.55,
+		SecondWaveDurationScale = 0.98,
+		SecondWaveResetGapSeconds = 0.045,
+		SecondWaveHorizontalPushMin = 0.52,
+		SecondWaveHorizontalPushMax = 1.05,
+		SecondWaveVerticalLiftMin = 0.34,
+		SecondWaveVerticalLiftMax = 0.72,
+		SecondWaveExtraRotation = 220,
+		SecondWaveFadeFraction = 0.64,
+		MinimumFadeSeconds = 0.18,
+
+		IntroScale = 0.70,
+		PopScale = 1.14,
+		TitlePopSeconds = 0.20,
+		TitleSettleSeconds = 0.15,
+		SecondTitlePulseScale = 1.045,
+		SecondTitlePulseSeconds = 0.10,
+		SecondTitleSettleSeconds = 0.12,
 	}),
 
 	Cue = table.freeze({

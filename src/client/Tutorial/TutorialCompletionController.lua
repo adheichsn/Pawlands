@@ -169,7 +169,52 @@ local function authoredNumber(gui, attributeName, fallback)
 	return fallback
 end
 
-local function playPiece(current, piece, token, burstStart, fadeStart)
+local function canAnimate(token, piece)
+	return started and token == generation and playing and piece.Parent ~= nil
+end
+
+local function restorePieceForBurst(current, piece, hidden)
+	local default = current.PieceDefaults[piece]
+	if not default or not piece.Parent then
+		return
+	end
+	piece.Position = default.Position
+	piece.Rotation = default.Rotation
+	piece.Visible = true
+	piece.BackgroundTransparency = hidden and 1 or default.BackgroundTransparency
+end
+
+local function launchPieceTween(piece, targetX, targetY, targetRotation, duration)
+	return registerTween(TweenService:Create(
+		piece,
+		TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{
+			Position = UDim2.fromScale(targetX, targetY),
+			Rotation = targetRotation,
+		}
+	))
+end
+
+local function secondWaveTarget(celebration, burstX, burstY, burstRotation, isLeft, index)
+	-- Deterministic per-piece spread. Values intentionally extend beyond the
+	-- authored corner container's 0..1 range; ClipsDescendants is authored off,
+	-- so the second burst can reach farther toward the viewport center/top.
+	local horizontalSeed = ((index * 37) % 101) / 100
+	local verticalSeed = ((index * 53) % 101) / 100
+	local horizontalPush = celebration.SecondWaveHorizontalPushMin
+		+ (celebration.SecondWaveHorizontalPushMax - celebration.SecondWaveHorizontalPushMin) * horizontalSeed
+	local verticalLift = celebration.SecondWaveVerticalLiftMin
+		+ (celebration.SecondWaveVerticalLiftMax - celebration.SecondWaveVerticalLiftMin) * verticalSeed
+	local direction = isLeft and 1 or -1
+	local spinDirection = index % 2 == 0 and 1 or -1
+
+	return burstX + direction * horizontalPush,
+		burstY - verticalLift,
+		burstRotation + spinDirection * (celebration.SecondWaveExtraRotation + index * 9)
+end
+
+local function playPieceDoubleBurst(current, piece, token, index, isLeft, firstBurstStart, secondBurstStart)
+	local celebration = TutorialConfig.CompletionCelebration
 	local burstX = piece:GetAttribute("BurstX")
 	local burstY = piece:GetAttribute("BurstY")
 	local burstRotation = piece:GetAttribute("BurstRotation")
@@ -184,27 +229,50 @@ local function playPiece(current, piece, token, burstStart, fadeStart)
 		return
 	end
 
-	local startAt = math.max(0, burstStart + burstDelay)
-	local duration = math.max(0.05, burstDuration)
-	task.delay(startAt, function()
-		if not started or token ~= generation or not playing or not piece.Parent then
+	local firstStartAt = math.max(0, firstBurstStart + burstDelay * celebration.FirstWaveDelayScale)
+	local firstDuration = math.max(0.16, burstDuration * celebration.FirstWaveDurationScale)
+	task.delay(firstStartAt, function()
+		if not canAnimate(token, piece) then
 			return
 		end
-		registerTween(TweenService:Create(
-			piece,
-			TweenInfo.new(duration, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{
-				Position = UDim2.fromScale(burstX, burstY),
-				Rotation = burstRotation,
-			}
-		))
+		restorePieceForBurst(current, piece, false)
+		launchPieceTween(piece, burstX, burstY, burstRotation, firstDuration)
 	end)
 
-	local endAt = startAt + duration
-	local pieceFadeAt = math.max(fadeStart, startAt + duration * 0.55)
-	local fadeDuration = math.max(0.08, endAt - pieceFadeAt)
-	task.delay(pieceFadeAt, function()
-		if not started or token ~= generation or not playing or not piece.Parent then
+	local secondDelay = burstDelay * celebration.SecondWaveDelayScale
+	local secondStartAt = math.max(0, secondBurstStart + secondDelay)
+	local resetAt = math.max(0, secondStartAt - celebration.SecondWaveResetGapSeconds)
+	task.delay(resetAt, function()
+		if not canAnimate(token, piece) then
+			return
+		end
+		restorePieceForBurst(current, piece, true)
+	end)
+
+	local targetX, targetY, targetRotation = secondWaveTarget(
+		celebration,
+		burstX,
+		burstY,
+		burstRotation,
+		isLeft,
+		index
+	)
+	local secondDuration = math.max(0.30, burstDuration * celebration.SecondWaveDurationScale)
+	task.delay(secondStartAt, function()
+		if not canAnimate(token, piece) then
+			return
+		end
+		restorePieceForBurst(current, piece, false)
+		launchPieceTween(piece, targetX, targetY, targetRotation, secondDuration)
+	end)
+
+	local fadeAt = secondStartAt + secondDuration * celebration.SecondWaveFadeFraction
+	local fadeDuration = math.max(
+		celebration.MinimumFadeSeconds,
+		secondDuration * (1 - celebration.SecondWaveFadeFraction)
+	)
+	task.delay(fadeAt, function()
+		if not canAnimate(token, piece) then
 			return
 		end
 		registerTween(TweenService:Create(
@@ -242,11 +310,10 @@ local function beginPlayback(current)
 		"ConfettiBurstStart",
 		celebration.ConfettiBurstStartSeconds
 	)
-	local fadeStart = authoredNumber(
-		current.Gui,
-		"ConfettiFadeStart",
-		celebration.ConfettiFadeStartSeconds
-	)
+	-- Keep authored duration as a floor-compatible hint, but the double-burst
+	-- polish needs enough room to finish cleanly even on older authored GUIs.
+	totalDuration = math.max(totalDuration, celebration.MinimumDurationSeconds)
+	local secondBurstStart = celebration.SecondWaveStartSeconds
 
 	if current.Sound.SoundId ~= "" then
 		current.Sound.TimePosition = 0
@@ -274,12 +341,34 @@ local function beginPlayback(current)
 		end)
 	end)
 
-	for _, piece in ipairs(current.LeftPieces) do
-		playPiece(current, piece, token, burstStart, fadeStart)
+	for index, piece in ipairs(current.LeftPieces) do
+		playPieceDoubleBurst(current, piece, token, index, true, burstStart, secondBurstStart)
 	end
-	for _, piece in ipairs(current.RightPieces) do
-		playPiece(current, piece, token, burstStart, fadeStart)
+	for index, piece in ipairs(current.RightPieces) do
+		playPieceDoubleBurst(current, piece, token, index, false, burstStart, secondBurstStart)
 	end
+
+	-- A small second title pulse lands with burst #2 without changing authored copy/layout.
+	task.delay(math.max(0, secondBurstStart), function()
+		if not started or token ~= generation or not playing or not current.PopScale.Parent then
+			return
+		end
+		local pulseTween = registerTween(TweenService:Create(
+			current.PopScale,
+			TweenInfo.new(celebration.SecondTitlePulseSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Scale = celebration.SecondTitlePulseScale }
+		))
+		pulseTween.Completed:Once(function()
+			if not started or token ~= generation or not playing or not current.PopScale.Parent then
+				return
+			end
+			registerTween(TweenService:Create(
+				current.PopScale,
+				TweenInfo.new(celebration.SecondTitleSettleSeconds, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+				{ Scale = current.AuthoredPopScale }
+			))
+		end)
+	end)
 
 	task.delay(math.max(0.1, totalDuration), function()
 		if not started or token ~= generation or not playing then
