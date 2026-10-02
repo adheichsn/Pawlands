@@ -1,4 +1,4 @@
-# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5.4
+# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5.5
 
 This stage extends the Studio-owned tutorial flow with contextual movement guidance, a longer Alex introduction, and a first combat lesson that intentionally happens before the Player receives a starter Pet.
 
@@ -63,3 +63,12 @@ Tutorial Slimes are tagged internally by encounter generation inside `TutorialSe
 The arrow points to `Workspace > StarterStoneIsland > NPC > Alex > HumanoidRootPart` during `MeetAlex` and `ReturnToAlex`, and to `Workspace > StarterStoneIsland > Tutorial > Zones > CombatZone` during `GoToZone` and `PetCombatReady`. It is hidden during dialogue, combat, starter selection, and Inventory equip teaching, then is cleaned up when no navigation target remains or the tutorial reaches `Completed`. Respawn and streamed-target recovery rebuild the local presentation from the current server-owned tutorial stage.
 
 The movement/rotation presentation is adapted from the supplied 3D Tutorial Arrow reference: the arrow follows above/behind the Player while far away, smoothly turns toward the active destination, and settles above the destination when nearby. Reference-only ProximityPrompt, ClickDetector, Touched completion, Highlight creation, and its separate tutorial step state machine are intentionally not ported.
+
+
+## Tutorial completion celebration
+
+3A.5.5 adds a one-time client presentation when the live tutorial stage transitions into `Completed`. It binds the Studio-authored `StarterGui > TutorialComplete` hierarchy and preserves the authored title copy (`TUTORIAL COMPLETE!` / `Your Adventure Begins!`), responsive constraints, confetti pieces, colors, and `CompleteSound`. Runtime does not create GUI hierarchy.
+
+The title performs a short pop/settle animation while the authored left/right confetti pieces tween from their corner origins using each piece's `BurstX`, `BurstY`, `BurstRotation`, `BurstDelay`, and `BurstDuration` attributes. Timing attributes on the `TutorialComplete` ScreenGui are preferred when present, with shared config values only as fallbacks. After the authored duration, the controller restores the template state and disables the ScreenGui.
+
+The celebration is intentionally session-edge triggered: a live non-`Completed` → `Completed` transition plays once, while a Player who joins or respawns with an already-completed tutorial does not replay it. Tutorial progression remains server-authoritative; the celebration is presentation-only and grants no Coins, Diamonds, Player EXP, Pet EXP, loot, or other rewards.

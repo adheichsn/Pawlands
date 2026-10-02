@@ -113,6 +113,26 @@ return table.freeze({
 		RotationOffset = Vector3.new(90, -90, 0),
 	}),
 
+	CompletionCelebration = table.freeze({
+		GuiName = "TutorialComplete",
+		MainName = "Main",
+		TitleName = "Title",
+		PopScaleName = "PopScale",
+		LeftConfettiName = "LeftConfetti",
+		RightConfettiName = "RightConfetti",
+		SoundName = "CompleteSound",
+		PiecePrefix = "Piece",
+
+		DefaultDurationSeconds = 2.6,
+		TitlePopStartSeconds = 0.08,
+		ConfettiBurstStartSeconds = 0.20,
+		ConfettiFadeStartSeconds = 0.92,
+		IntroScale = 0.78,
+		PopScale = 1.08,
+		TitlePopSeconds = 0.16,
+		TitleSettleSeconds = 0.12,
+	}),
+
 	Cue = table.freeze({
 		GuiName = "TutorialCues",
 		SafeBoundsName = "SafeBounds",
