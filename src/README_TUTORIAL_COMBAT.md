@@ -1,4 +1,4 @@
-# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5.3
+# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5.4
 
 This stage extends the Studio-owned tutorial flow with contextual movement guidance, a longer Alex introduction, and a first combat lesson that intentionally happens before the Player receives a starter Pet.
 
@@ -56,3 +56,10 @@ After starter grant, the player enters `EquipStarterPet`. The Pet Inventory runt
 
 Tutorial Slimes are tagged internally by encounter generation inside `TutorialService`; stale hit/defeat signals from a cancelled wave cannot advance or increment a newer wave. Orphaned tutorial encounter runtime is cancelled before a fresh wave is allowed to start. Studio-authored Inventory, starter-selection, and cue presentation also release stale interaction locks and rebind if their `ScreenGui` instances are replaced. Starter Pet grants remain server-gated by the existing single-grant attribute plus the request-in-flight guard.
 
+## 3D tutorial navigation arrow
+
+3A.5.4 adds a client-only 3D navigation presentation using the Studio-authored `ReplicatedStorage > Assets > Tutorial > ArrowModel`. The arrow does not own tutorial progression and does not create interaction prompts. `TutorialService` remains the authority for every stage transition.
+
+The arrow points to `Workspace > StarterStoneIsland > NPC > Alex > HumanoidRootPart` during `MeetAlex` and `ReturnToAlex`, and to `Workspace > StarterStoneIsland > Tutorial > Zones > CombatZone` during `GoToZone` and `PetCombatReady`. It is hidden during dialogue, combat, starter selection, and Inventory equip teaching, then is cleaned up when no navigation target remains or the tutorial reaches `Completed`. Respawn and streamed-target recovery rebuild the local presentation from the current server-owned tutorial stage.
+
+The movement/rotation presentation is adapted from the supplied 3D Tutorial Arrow reference: the arrow follows above/behind the Player while far away, smoothly turns toward the active destination, and settles above the destination when nearby. Reference-only ProximityPrompt, ClickDetector, Touched completion, Highlight creation, and its separate tutorial step state machine are intentionally not ported.
