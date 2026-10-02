@@ -82,6 +82,13 @@ function SlimeAttackRuntime.Update(agent, now, zone, config, resolveTarget, appl
 		SlimeAttackRuntime.Cancel(agent, now, config)
 		return false
 	end
+	if strike.TargetKind == "Pet" and currentTarget.AssignedSlimeModel ~= agent.Model then
+		-- Pet positions are server-owned combat proxies. If the exact Pet UID is no
+		-- longer assigned to this slime, the committed strike must not follow the Pet
+		-- into a different duel or through a regroup/return transition.
+		SlimeAttackRuntime.Cancel(agent, now, config)
+		return false
+	end
 
 	-- Target position/direction are locked when wind-up begins. This keeps both
 	-- Player and pet strikes readable and prevents homing after commitment.
@@ -100,13 +107,35 @@ function SlimeAttackRuntime.Update(agent, now, zone, config, resolveTarget, appl
 
 	if not strike.ImpactApplied and now >= strike.ImpactAt then
 		strike.ImpactApplied = true
-		local dodgeDistance = horizontalDistance(currentTarget.Position, strike.TargetPosition)
-		local currentDistance = horizontalDistance(resolved, currentTarget.Position)
-		local clearRoute = zone:HasClearRoute(resolved, currentTarget.Position, currentDistance + 0.1)
-		if dodgeDistance <= config.AttackDodgeToleranceStuds
-			and currentDistance <= config.AttackMaxImpactDistanceStuds
-			and clearRoute
-		then
+
+		local impactPosition = currentTarget.Position
+		local validImpact = false
+		if strike.TargetKind == "Pet" then
+			-- A Pet has no authoritative world transform on the server; its combat
+			-- Position is a formation goal derived from the slime's current position.
+			-- Re-running Player-style dodge validation against that moving proxy makes
+			-- the slime's own lunge look like the Pet dodged. Validate contact against
+			-- the locked combat anchor instead. Exact UID/assignment/KO validity was
+			-- already re-resolved above before this impact is allowed.
+			impactPosition = strike.TargetPosition
+			local impactDistance = horizontalDistance(resolved, impactPosition)
+			local clearRoute = zone:HasClearRoute(resolved, impactPosition, impactDistance + 0.1)
+			validImpact = impactDistance <= config.AttackMaxImpactDistanceStuds and clearRoute
+		else
+			-- Players keep the authored locked-strike dodge window.
+			local dodgeDistance = horizontalDistance(currentTarget.Position, strike.TargetPosition)
+			local impactDistance = horizontalDistance(resolved, currentTarget.Position)
+			local clearRoute = zone:HasClearRoute(
+				resolved,
+				currentTarget.Position,
+				impactDistance + 0.1
+			)
+			validImpact = dodgeDistance <= config.AttackDodgeToleranceStuds
+				and impactDistance <= config.AttackMaxImpactDistanceStuds
+				and clearRoute
+		end
+
+		if validImpact then
 			local applied = applyDamage and applyDamage(strike, currentTarget, config.AttackDamage) or false
 			if applied and RunService:IsStudio() then
 				local targetName = strike.TargetKind == "Pet"
