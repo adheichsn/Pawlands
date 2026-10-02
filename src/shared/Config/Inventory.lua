@@ -16,7 +16,13 @@ return table.freeze({
 	DefaultVariantName = "Normal",
 	FavoriteOffText = "Favorite: OFF",
 	FavoriteOnText = "Favorite: ON",
+	FavoriteStrokeColor = Color3.fromRGB(255, 220, 64),
 	EquippedPetsTextFormat = "Equipped Pets (%d/%d)",
+	OwnedCountTextFormat = "%d",
+	EmptyItemCountText = "0",
+	EmptyBadgeText = "0",
+	EmptyPetsText = "No pets in this category!",
+	EmptyItemsText = "No items in this category!",
 	DamageTextFormat = "%d DMG",
 
 	PartyMutationLockedAttributeName = "PawlandsPetPartyLocked",

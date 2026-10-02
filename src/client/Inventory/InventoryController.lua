@@ -21,6 +21,7 @@ local favoriteMode = false
 local busy = false
 local warnedMissing = false
 local partyLockNoticeSerial = 0
+local favoriteStrokeDefaults = nil
 
 local function disconnectAll()
 	for _, connection in ipairs(connections) do
@@ -72,6 +73,15 @@ local function resolveRefs()
 	local options = top and child(top, "Options", "Frame")
 	local petsTab = options and child(options, "Pets", "ImageButton")
 	local itemsTab = options and child(options, "Items", "ImageButton")
+	local petsLabel = petsTab and child(petsTab, "Label", "TextLabel")
+	local itemsLabel = itemsTab and child(itemsTab, "Label", "TextLabel")
+	local petCount = petsLabel and child(petsLabel, "BagSize", "TextLabel")
+	local itemCount = itemsLabel and child(itemsLabel, "ItemSize", "TextLabel")
+	local petsNotification = petsTab and child(petsTab, "Notification", "Frame")
+	local itemsNotification = itemsTab and child(itemsTab, "Notification", "Frame")
+	local petsNotificationLabel = petsNotification and child(petsNotification, "Label", "TextLabel")
+	local itemsNotificationLabel = itemsNotification and child(itemsNotification, "Label", "TextLabel")
+	local noneLabel = nonePage and child(nonePage, "Label", "TextLabel")
 	local sellAll = main and child(main, "SellAll", "ImageButton")
 	local configuration = main and child(main, "Configuration", "Frame")
 
@@ -86,6 +96,7 @@ local function resolveRefs()
 		or not addFrame or not addTile or not equipLabel or not closeButton
 		or not favorite or not favoriteLabel or not favoriteLabel:IsA("TextLabel")
 		or not searchBar or not autoOptions or not options or not petsTab or not itemsTab
+		or not petCount or not itemCount or not noneLabel
 		or not sellAll or not configuration or not hudButton or not hudKeyButton
 	then
 		refs = nil
@@ -114,6 +125,13 @@ local function resolveRefs()
 		AutoOptions = autoOptions,
 		PetsTab = petsTab,
 		ItemsTab = itemsTab,
+		PetCount = petCount,
+		ItemCount = itemCount,
+		PetsNotification = petsNotification,
+		ItemsNotification = itemsNotification,
+		PetsNotificationLabel = petsNotificationLabel,
+		ItemsNotificationLabel = itemsNotificationLabel,
+		NoneLabel = noneLabel,
 		SellAll = sellAll,
 		Configuration = configuration,
 		HudButton = hudButton,
@@ -170,6 +188,77 @@ local function searchTextFor(pet)
 		normalizedVariant(pet),
 		tostring(definition and definition.Rarity or ""),
 	}, " "))
+end
+
+local function validOwnedPetCount(value)
+	local count = 0
+	if type(value) ~= "table" then
+		return count
+	end
+	for _, pet in ipairs(value.Pets or {}) do
+		if type(pet) == "table" and type(pet.Uid) == "string" and PetCatalog.Pets[pet.PetId] then
+			count += 1
+		end
+	end
+	return count
+end
+
+local function captureFavoriteStrokeDefaults(template)
+	local stroke = template and template:FindFirstChildOfClass("UIStroke")
+	if not stroke then
+		return nil
+	end
+	local gradient = stroke:FindFirstChildOfClass("UIGradient")
+	return {
+		StrokeEnabled = stroke.Enabled,
+		StrokeColor = stroke.Color,
+		GradientEnabled = gradient and gradient.Enabled or nil,
+		GradientColor = gradient and gradient.Color or nil,
+	}
+end
+
+local function applyFavoriteStroke(tile, isFavorite)
+	local stroke = tile:FindFirstChildOfClass("UIStroke")
+	if not stroke then
+		return
+	end
+	local gradient = stroke:FindFirstChildOfClass("UIGradient")
+	if isFavorite then
+		stroke.Enabled = true
+		stroke.Color = InventoryConfig.FavoriteStrokeColor
+		if gradient then
+			gradient.Enabled = true
+			gradient.Color = ColorSequence.new(InventoryConfig.FavoriteStrokeColor)
+		end
+	elseif favoriteStrokeDefaults then
+		stroke.Enabled = favoriteStrokeDefaults.StrokeEnabled
+		stroke.Color = favoriteStrokeDefaults.StrokeColor
+		if gradient and favoriteStrokeDefaults.GradientEnabled ~= nil then
+			gradient.Enabled = favoriteStrokeDefaults.GradientEnabled
+			gradient.Color = favoriteStrokeDefaults.GradientColor
+		end
+	end
+end
+
+local function resetPlaceholderBadges(current)
+	if current.PetsNotificationLabel then
+		current.PetsNotificationLabel.Text = InventoryConfig.EmptyBadgeText
+	end
+	if current.ItemsNotificationLabel then
+		current.ItemsNotificationLabel.Text = InventoryConfig.EmptyBadgeText
+	end
+	if current.PetsNotification then
+		current.PetsNotification.Visible = false
+	end
+	if current.ItemsNotification then
+		current.ItemsNotification.Visible = false
+	end
+end
+
+local function bindRuntimeCounts(current, petCount)
+	current.PetCount.Text = string.format(InventoryConfig.OwnedCountTextFormat, math.max(0, petCount or 0))
+	current.ItemCount.Text = InventoryConfig.EmptyItemCountText
+	resetPlaceholderBadges(current)
 end
 
 local function invoke(action, uid)
@@ -254,6 +343,7 @@ local function configureTile(tile, pet, equipped, order, namePrefix)
 	if favoriteIcon and favoriteIcon:IsA("GuiObject") then
 		favoriteIcon.Visible = pet.Favorite == true
 	end
+	applyFavoriteStroke(tile, pet.Favorite == true)
 	if attack and attack:IsA("TextLabel") and definition then
 		attack.Text = string.format(InventoryConfig.DamageTextFormat, definition.BaseDamage)
 	end
@@ -314,6 +404,15 @@ local function applyPageAndSearch()
 	if currentPage ~= "Pets" then
 		current.PetsPage.Visible = false
 		current.ItemsPage.Visible = false
+		current.NoneLabel.Text = InventoryConfig.EmptyItemsText
+		current.NonePage.Visible = true
+		return
+	end
+
+	if validOwnedPetCount(snapshot) == 0 then
+		current.PetsPage.Visible = false
+		current.ItemsPage.Visible = false
+		current.NoneLabel.Text = InventoryConfig.EmptyPetsText
 		current.NonePage.Visible = true
 		return
 	end
@@ -381,6 +480,7 @@ renderSnapshot = function()
 		#(snapshot.Party or {}),
 		PetPartyConfig.MaxSize
 	)
+	bindRuntimeCounts(current, inventoryOrder)
 	applyPageAndSearch()
 end
 
@@ -438,6 +538,9 @@ local function prepareAuthoredUi(current)
 	current.Gui.Enabled = false
 	current.PetTemplate.Visible = false
 	current.AddFrame.Visible = false
+	favoriteStrokeDefaults = captureFavoriteStrokeDefaults(current.PetTemplate)
+	bindRuntimeCounts(current, 0)
+	current.NoneLabel.Text = InventoryConfig.EmptyPetsText
 
 	-- Reuse the authored Top UIGridLayout and authored AddFrame size for the four
 	-- party slots. Runtime does not create a layout or slot hierarchy from scratch.
@@ -536,6 +639,7 @@ function InventoryController.Stop()
 	favoriteMode = false
 	busy = false
 	warnedMissing = false
+	favoriteStrokeDefaults = nil
 	partyLockNoticeSerial += 1
 	TextNotificationController.Clear(InventoryConfig.PartyMutationNotificationKey)
 end

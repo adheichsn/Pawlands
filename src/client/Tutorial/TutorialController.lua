@@ -225,7 +225,10 @@ local function dialogueActive()
 end
 
 local function renderGuidance()
-	if dialogueActive() then
+	-- Inventory keeps locomotion available, but generic FTUE movement/sprint/combat
+	-- hints should not sit on top of the modal. Dedicated contextual Inventory cues
+	-- use TutorialCueController and are intentionally unaffected by this suppression.
+	if dialogueActive() or InteractionLock.IsLocked("Inventory") then
 		TextNotificationController.Clear(TutorialConfig.NotificationKey)
 		return
 	end
