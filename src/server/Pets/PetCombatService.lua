@@ -7,6 +7,7 @@ local Pawlands = ReplicatedStorage:WaitForChild("Pawlands")
 local Shared = Pawlands:WaitForChild("Shared")
 local Catalog = require(Shared.Config.PetCatalog)
 local Config = require(Shared.Config.PetCombat)
+local WorldConfig = require(Shared.Config.WorldPetCombat)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
 local Codec = require(Shared.Pets.PetCombatCodec)
 local CombatFormation = require(Shared.Pets.PetCombatFormation)
@@ -32,6 +33,98 @@ local COMBAT_STATES = table.freeze({
 	Engage = true,
 	Attack = true,
 })
+
+local function isWorldTarget(model)
+	return model and model:GetAttribute("WorldCombat") == true
+end
+
+local function acquisitionRange(model)
+	if isWorldTarget(model) then
+		return WorldConfig.CombatRadiusStuds
+	end
+	return Config.SoftLeashStuds
+end
+
+local function retentionRange(model)
+	if isWorldTarget(model) then
+		return WorldConfig.DisengageDistanceStuds
+	end
+	return Config.HardLeashStuds
+end
+
+local function recentPlayerAssist(model, player, now)
+	if not isWorldTarget(model) then
+		return false
+	end
+	if tonumber(model:GetAttribute("LastPlayerHitUserId")) ~= player.UserId
+		or tostring(model:GetAttribute("LastPlayerHitActionType") or "") ~= "M1"
+	then
+		return false
+	end
+	local hitAt = tonumber(model:GetAttribute("LastPlayerHitAt")) or -math.huge
+	return now - hitAt <= WorldConfig.PlayerAssistBiasSeconds
+end
+
+local function worldReturnMaxSpeed(distance)
+	if distance >= WorldConfig.ReturnFarDistanceStuds then
+		return WorldConfig.ReturnVeryFarMaxSpeedStuds
+	elseif distance >= WorldConfig.ReturnMediumDistanceStuds then
+		return WorldConfig.ReturnFarMaxSpeedStuds
+	elseif distance >= WorldConfig.ReturnNearDistanceStuds then
+		return WorldConfig.ReturnMediumMaxSpeedStuds
+	end
+	return WorldConfig.ReturnNearMaxSpeedStuds
+end
+
+local function worldReturnLockDuration(distance, root)
+	local ownerSpeed = 0
+	if root then
+		local velocity = root.AssemblyLinearVelocity
+		ownerSpeed = Vector3.new(velocity.X, 0, velocity.Z).Magnitude
+	end
+	local relativeCatchUp = math.max(
+		WorldConfig.ReturnMinimumRelativeCatchUpSpeedStuds,
+		worldReturnMaxSpeed(distance) - ownerSpeed
+	)
+	local travel = math.max(0, distance - WorldConfig.ReturnRegroupBufferStuds) / relativeCatchUp
+	return math.clamp(
+		travel + WorldConfig.ReturnLockPaddingSeconds,
+		WorldConfig.ReturnAcquireLockMinSeconds,
+		WorldConfig.ReturnAcquireLockMaxSeconds
+	)
+end
+
+local function beginWorldReturn(state, petSlot, uid, model, root, now)
+	if not state
+		or not isWorldTarget(model)
+		or not model:IsDescendantOf(Workspace)
+		or not SlimeHealth.IsAlive(model)
+	then
+		return
+	end
+	local distance = root and (model:GetPivot().Position - root.Position).Magnitude or WorldConfig.DisengageDistanceStuds
+	local previous = state.WorldReturns[petSlot]
+	local untilAt = now + worldReturnLockDuration(distance, root)
+	if previous and previous.Uid == uid then
+		untilAt = math.max(previous.UntilAt or 0, untilAt)
+	end
+	state.WorldReturns[petSlot] = {
+		Uid = uid,
+		UntilAt = untilAt,
+	}
+end
+
+local function isWorldReturnLocked(state, petSlot, uid, now)
+	local returnState = state.WorldReturns[petSlot]
+	if not returnState then
+		return false
+	end
+	if returnState.Uid ~= uid or now >= (returnState.UntilAt or 0) then
+		state.WorldReturns[petSlot] = nil
+		return false
+	end
+	return true
+end
 
 local function ensureImpactRemote()
 	local folder = Pawlands:FindFirstChild(Config.RemoteFolderName)
@@ -112,7 +205,7 @@ local function isActiveTarget(model, player)
 	return COMBAT_STATES[tostring(model:GetAttribute("SlimeState"))] == true
 end
 
-local function collectTargets(player, root)
+local function collectTargets(player, root, assistNow)
 	local folder = runtimeFolder()
 	if not folder then
 		return {}
@@ -123,11 +216,12 @@ local function collectTargets(player, root)
 			local slimeSlot = tonumber(model:GetAttribute("SlimeSlot"))
 			if slimeSlot then
 				local distance = (model:GetPivot().Position - root.Position).Magnitude
-				if distance <= Config.HardLeashStuds then
+				if distance <= retentionRange(model) then
 					table.insert(targets, {
 						Model = model,
 						Slot = math.floor(slimeSlot),
 						Distance = distance,
+						Assisted = recentPlayerAssist(model, player, assistNow),
 					})
 				end
 			end
@@ -266,7 +360,7 @@ local function processImpact(player, petSlot, slimeSlot)
 	end
 	local slimePosition = entry.SlimeModel:GetPivot().Position
 	if (slimePosition - root.Position).Magnitude
-		> Config.HardLeashStuds + Config.ServerImpactLeashPaddingStuds
+		> retentionRange(entry.SlimeModel) + Config.ServerImpactLeashPaddingStuds
 	then
 		return
 	end
@@ -318,11 +412,13 @@ local function stepPlayer(player, dt)
 			CombatAnchors = {},
 			CombatTargets = {},
 			AttackGuards = {},
+			WorldReturns = {},
 		}
 		stateByPlayer[player] = state
 	end
 
-	local targets = collectTargets(player, root)
+	local clock = os.clock()
+	local targets = collectTargets(player, root, time())
 	local byModel = {}
 	for _, target in ipairs(targets) do
 		byModel[target.Model] = target
@@ -340,7 +436,7 @@ local function stepPlayer(player, dt)
 	-- this naturally resolves as 1/1/1/1, 2/1/1, 2/2, then 4 on the last slime.
 	local acquirableTargetCount = 0
 	for _, target in ipairs(targets) do
-		if target.Distance <= Config.SoftLeashStuds then
+		if target.Distance <= acquisitionRange(target.Model) then
 			acquirableTargetCount += 1
 		end
 	end
@@ -359,27 +455,43 @@ local function stepPlayer(player, dt)
 		local uid = party[petSlot]
 		local canCombat = not vitalsService or vitalsService.CanCombat(player, uid)
 		local targetModel = canCombat and state.Assignments[petSlot] or nil
+		local returning = isWorldReturnLocked(state, petSlot, uid, clock)
 		local target = targetModel and byModel[targetModel]
-		if target and target.Distance <= Config.HardLeashStuds and attackerCapacity > 0 then
+		if not returning
+			and target
+			and target.Distance <= retentionRange(target.Model)
+			and attackerCapacity > 0
+		then
 			local count = counts[target.Model] or 0
 			if count < attackerCapacity then
 				nextAssignments[petSlot] = target.Model
 				counts[target.Model] = count + 1
 			end
+		elseif not returning and canCombat and targetModel and isWorldTarget(targetModel) then
+			-- A living Stonewood target that leaves the owner's encounter causes an
+			-- explicit regroup window. Defeated targets are exempt so normal grinding
+			-- can immediately hand off to the next nearby Slime.
+			beginWorldReturn(state, petSlot, uid, targetModel, root, clock)
 		end
 	end
 
 	local function chooseTarget()
 		local best
 		for _, target in ipairs(targets) do
-			if target.Distance <= Config.SoftLeashStuds then
+			if target.Distance <= acquisitionRange(target.Model) then
 				local count = counts[target.Model] or 0
 				if count < attackerCapacity then
 					local bestCount = best and (counts[best.Model] or 0) or math.huge
+					local assisted = target.Assisted == true
+					local bestAssisted = best and best.Assisted == true or false
 					if not best
 						or count < bestCount
-						or (count == bestCount and target.Distance < best.Distance)
-						or (count == bestCount and math.abs(target.Distance - best.Distance) <= 0.01 and target.Slot < best.Slot)
+						or (count == bestCount and assisted and not bestAssisted)
+						or (count == bestCount and assisted == bestAssisted and target.Distance < best.Distance)
+						or (count == bestCount
+						and assisted == bestAssisted
+						and math.abs(target.Distance - best.Distance) <= 0.01
+						and target.Slot < best.Slot)
 					then
 						best = target
 					end
@@ -392,7 +504,8 @@ local function stepPlayer(player, dt)
 	for petSlot = 1, #party do
 		local uid = party[petSlot]
 		local canCombat = not vitalsService or vitalsService.CanCombat(player, uid)
-		if canCombat and not nextAssignments[petSlot] then
+		local returning = isWorldReturnLocked(state, petSlot, uid, clock)
+		if canCombat and not returning and not nextAssignments[petSlot] then
 			local target = chooseTarget()
 			if not target then
 				continue
@@ -415,7 +528,7 @@ local function stepPlayer(player, dt)
 		state.CombatTargets,
 		root,
 		#party,
-		os.clock(),
+		clock,
 		dt or (1 / math.max(1, Config.UpdateRate))
 	)
 	state.Published = publish(player, serializable, state.Published)

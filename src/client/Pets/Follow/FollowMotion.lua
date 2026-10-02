@@ -16,12 +16,17 @@ local function turnYaw(currentYaw, targetYaw, dt, maxDegreesPerSecond)
 end
 
 function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, recall, presentationOffset, motionProfile)
+	local naturalReturn = motionProfile and motionProfile.NaturalReturn == true
 	local targetY = probe:Height(target.X, target.Z, root.Position.Y)
 	if not targetY then
-		-- Recover near the player at an edge or across an unloaded gap.
+		-- Normal follow keeps the established edge/gap recovery. Stonewood combat
+		-- return first tries to move toward the owner's grounded root instead of
+		-- immediately teleporting when a formation slot lands over a gap.
 		target = root.Position
 		targetY = probe:Height(target.X, target.Z, root.Position.Y)
-		recall = true
+		if not naturalReturn then
+			recall = true
+		end
 	end
 	if not targetY then
 		return false
@@ -33,11 +38,13 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 	end
 	local goal = Vector3.new(target.X, targetY + height, target.Z)
 	local previous = visual.Position
-	if not previous or recall or (previous - goal).Magnitude > Config.RecallDistance then
+	local emergencyDistance = motionProfile and motionProfile.EmergencyRecallDistance or Config.RecallDistance
+	if not previous or recall or (previous - goal).Magnitude > emergencyDistance then
 		previous = goal
 		visual.Walk = 0
 		visual.MotionSpeed = 0
 		visual.Yaw = nil
+		visual.NaturalReturnStuckSince = nil
 	end
 	local followSpeed = motionProfile and motionProfile.FollowSpeed or Config.FollowSpeed
 	local position = previous:Lerp(goal, alpha(followSpeed, dt))
@@ -76,7 +83,31 @@ function FollowMotion.step(visual, target, root, targetYaw, dt, clock, probe, re
 	end
 	local groundY = probe:Height(position.X, position.Z, root.Position.Y)
 	if not groundY then
-		position, groundY = goal, targetY
+		if naturalReturn and flying and not recall then
+			-- Flying Pets keep their current hover plane across a temporary gap and
+			-- continue physically catching the owner instead of waiting for ground.
+			groundY = previous.Y - height
+			visual.NaturalReturnStuckSince = nil
+		elseif naturalReturn and not recall then
+			visual.NaturalReturnStuckSince = visual.NaturalReturnStuckSince or clock
+			local stuckSeconds = motionProfile.StuckRecallSeconds or 0
+			if stuckSeconds > 0 and clock - visual.NaturalReturnStuckSince >= stuckSeconds then
+				-- Failsafe only after a sustained failed physical return attempt.
+				position, groundY = goal, targetY
+				visual.NaturalReturnStuckSince = nil
+				visual.Walk = 0
+				visual.MotionSpeed = 0
+			else
+				-- Ground Pets stay at the last valid grounded pose and keep retrying.
+				position = previous
+				groundY = previous.Y - height
+				visual.MotionSpeed = 0
+			end
+		else
+			position, groundY = goal, targetY
+		end
+	else
+		visual.NaturalReturnStuckSince = nil
 	end
 	-- Sample beneath the current position; step up without sinking into a ramp.
 	local floorY = groundY + height

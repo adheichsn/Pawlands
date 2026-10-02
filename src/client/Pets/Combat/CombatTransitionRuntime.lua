@@ -1,5 +1,6 @@
 local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.PetCombat)
+local WorldConfig = require(Shared.Config.WorldPetCombat)
 
 local CombatTransitionRuntime = {}
 
@@ -22,23 +23,60 @@ local function getState(states, slot)
 		HadCombat = false,
 		HoldUntil = 0,
 		Mode = "Follow",
+		TargetWasWorld = false,
+		ReturningFromWorld = false,
 	}
 	states[slot] = state
 	return state
+end
+
+local function isWorldTarget(targetToken)
+	return targetToken and targetToken:GetAttribute("WorldCombat") == true
+end
+
+local function worldReturnProfile(distance)
+	local maxSpeed = WorldConfig.ReturnNearMaxSpeedStuds
+	if distance >= WorldConfig.ReturnFarDistanceStuds then
+		maxSpeed = WorldConfig.ReturnVeryFarMaxSpeedStuds
+	elseif distance >= WorldConfig.ReturnMediumDistanceStuds then
+		maxSpeed = WorldConfig.ReturnFarMaxSpeedStuds
+	elseif distance >= WorldConfig.ReturnNearDistanceStuds then
+		maxSpeed = WorldConfig.ReturnMediumMaxSpeedStuds
+	end
+	return {
+		FollowSpeed = WorldConfig.ReturnFollowSpeed,
+		MaxHorizontalSpeed = maxSpeed,
+		MaxHorizontalAcceleration = WorldConfig.ReturnAccelerationStudsPerSecond2,
+		TurnSpeedDegreesPerSecond = WorldConfig.ReturnTurnSpeedDegreesPerSecond,
+		NaturalReturn = true,
+		EmergencyRecallDistance = WorldConfig.EmergencyRecallDistanceStuds,
+		StuckRecallSeconds = WorldConfig.StuckRecallSeconds,
+	}
 end
 
 function CombatTransitionRuntime.step(states, slot, visualPosition, targetToken, combatGoal, followGoal, clock)
 	local state = getState(states, slot)
 	local previousTarget = state.TargetToken
 	if targetToken ~= previousTarget then
+		local previousWasWorld = state.TargetWasWorld == true
 		state.TargetToken = targetToken
+		state.TargetWasWorld = isWorldTarget(targetToken)
 		if previousTarget ~= nil then
 			state.HadCombat = true
+			state.ReturningFromWorld = targetToken == nil and previousWasWorld
 			state.Mode = targetToken ~= nil and "Retarget" or "Return"
-			local recover = targetToken ~= nil and Config.RetargetRecoverSeconds or Config.ReturnRecoverSeconds
+			local recover
+			if targetToken ~= nil then
+				recover = Config.RetargetRecoverSeconds
+			elseif previousWasWorld then
+				recover = WorldConfig.ReturnRecoverSeconds
+			else
+				recover = Config.ReturnRecoverSeconds
+			end
 			state.HoldUntil = math.max(state.HoldUntil or 0, clock + recover + stagger(slot))
 		elseif targetToken ~= nil then
 			state.HadCombat = true
+			state.ReturningFromWorld = false
 			state.Mode = (state.HoldUntil or 0) > clock and "Retarget" or "Combat"
 		end
 	end
@@ -73,13 +111,21 @@ function CombatTransitionRuntime.step(states, slot, visualPosition, targetToken,
 
 	if state.HadCombat then
 		state.Mode = "Return"
-		if visualPosition and followGoal
-			and horizontalDistance(visualPosition, followGoal) <= Config.TransitionSettleRadiusStuds
-		then
+		local returnDistance = visualPosition and followGoal
+			and horizontalDistance(visualPosition, followGoal)
+			or 0
+		local settleRadius = state.ReturningFromWorld
+			and WorldConfig.ReturnSettleRadiusStuds
+			or Config.TransitionSettleRadiusStuds
+		if visualPosition and followGoal and returnDistance <= settleRadius then
 			state.HadCombat = false
+			state.ReturningFromWorld = false
 			state.Mode = "Follow"
 			state.HoldUntil = 0
 			return followGoal, nil, false, "Follow"
+		end
+		if state.ReturningFromWorld then
+			return followGoal, worldReturnProfile(returnDistance), false, "Return"
 		end
 		return followGoal, {
 			FollowSpeed = Config.ReturnFollowSpeed,
