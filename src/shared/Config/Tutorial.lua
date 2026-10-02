@@ -85,7 +85,7 @@ return table.freeze({
 		AssetName = "ArrowModel",
 		RuntimeName = "TutorialArrowModel_Client",
 
-		WorldRootName = "StarterStoneIsland",
+		WorldRootName = "SeabreezeIsland",
 		NpcFolderName = "NPC",
 		AlexName = "Alex",
 		AlexTargetPartName = "HumanoidRootPart",

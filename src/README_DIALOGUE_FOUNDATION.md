@@ -22,7 +22,7 @@ Optional authored anchors used when present:
 
 NPCs remain Studio-owned. The first registered tutorial NPC is:
 
-- `Workspace > StarterStoneIsland > NPC > Alex`
+- `Workspace > SeabreezeIsland > NPC > Alex`
 - `Alex > HumanoidRootPart > ProximityPrompt`
 
 Future NPCs can set a Model attribute named `DialogueId` and register the matching definition in `shared/Dialogue/DialogueDefinitions.lua`. `Alex` currently has a name fallback to `TutorialAlex`, so no Studio attribute is required for this first QA pass.

@@ -4,7 +4,7 @@ This patch adds server-owned slime locomotion before combat damage is introduced
 
 ## Studio assets used
 
-- Arena: `Workspace > StarterStoneIsland > Tutorial > Zones > CombatZone`
+- Arena: `Workspace > SeabreezeIsland > Tutorial > Zones > CombatZone`
 - Spawn/wander anchors: the eight `Attachment` children named `Points` under `CombatZone`
 - Slime models: `ReplicatedStorage > Assets > Slimes > StoneIsland`
   - `goopy`

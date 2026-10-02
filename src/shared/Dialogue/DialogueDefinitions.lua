@@ -45,7 +45,7 @@ local byId = {
 				Text = "Try picking up the pace first. You'll need to move quickly out there.",
 			},
 			Welcome = {
-				Text = "Hey there! Welcome to Stone Island.",
+				Text = "Hey there! Welcome to Seabreeze Island.",
 				Next = "CombatIntro",
 			},
 			CombatIntro = {

@@ -1,4 +1,4 @@
-# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5.5
+# Pawlands First-Time Onboarding, Solo Combat & Starter Pet — 3A.5.6
 
 This stage extends the Studio-owned tutorial flow with contextual movement guidance, a longer Alex introduction, and a first combat lesson that intentionally happens before the Player receives a starter Pet.
 
@@ -20,7 +20,7 @@ Authored notification preview tiles are hidden at runtime; only a cloned `TextTi
 3. Keyboard Players learn `Ctrl` sprint; gamepad Players learn `L3` sprint. The server validates actual horizontal sprint speed before advancing.
 4. Touch Players currently skip the sprint lesson after movement because Pawlands does not yet have a Studio-owned mobile Sprint button; this patch intentionally does not create one in code.
 5. `QuestTracker` changes to `Meet Alex`.
-6. Alex gives a longer Stone Island / Slime introduction and offers the first training mission.
+6. Alex gives a longer Seabreeze Island / Slime introduction and offers the first training mission.
 7. `QuestTracker` changes to `Go to Training Area`.
 8. Entering the authored CombatZone starts a three-Slime player-only training wave.
 9. Studio automatic Pet preview is disabled so QA matches the live zero-Pet onboarding baseline. Pet dev commands remain available for explicit testing.
@@ -60,7 +60,7 @@ Tutorial Slimes are tagged internally by encounter generation inside `TutorialSe
 
 3A.5.4 adds a client-only 3D navigation presentation using the Studio-authored `ReplicatedStorage > Assets > Tutorial > ArrowModel`. The arrow does not own tutorial progression and does not create interaction prompts. `TutorialService` remains the authority for every stage transition.
 
-The arrow points to `Workspace > StarterStoneIsland > NPC > Alex > HumanoidRootPart` during `MeetAlex` and `ReturnToAlex`, and to `Workspace > StarterStoneIsland > Tutorial > Zones > CombatZone` during `GoToZone` and `PetCombatReady`. It is hidden during dialogue, combat, starter selection, and Inventory equip teaching, then is cleaned up when no navigation target remains or the tutorial reaches `Completed`. Respawn and streamed-target recovery rebuild the local presentation from the current server-owned tutorial stage.
+The arrow points to `Workspace > SeabreezeIsland > NPC > Alex > HumanoidRootPart` during `MeetAlex` and `ReturnToAlex`, and to `Workspace > SeabreezeIsland > Tutorial > Zones > CombatZone` during `GoToZone` and `PetCombatReady`. It is hidden during dialogue, combat, starter selection, and Inventory equip teaching, then is cleaned up when no navigation target remains or the tutorial reaches `Completed`. Respawn and streamed-target recovery rebuild the local presentation from the current server-owned tutorial stage.
 
 The movement/rotation presentation is adapted from the supplied 3D Tutorial Arrow reference: the arrow follows above/behind the Player while far away, smoothly turns toward the active destination, and settles above the destination when nearby. Reference-only ProximityPrompt, ClickDetector, Touched completion, Highlight creation, and its separate tutorial step state machine are intentionally not ported.
 

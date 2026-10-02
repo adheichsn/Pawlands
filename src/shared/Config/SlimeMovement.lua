@@ -4,7 +4,7 @@ return table.freeze({
 	SpawnOnStart = false,
 	SpawnCount = 4,
 
-	ZonePath = table.freeze({ "StarterStoneIsland", "Tutorial", "Zones", "CombatZone" }),
+	ZonePath = table.freeze({ "SeabreezeIsland", "Tutorial", "Zones", "CombatZone" }),
 	SpawnPointName = "Points",
 	ZonePadding = 1.5,
 
