@@ -6,12 +6,11 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local TutorialConfig = require(Shared.Config.Tutorial)
 local SlimeMovementConfig = require(Shared.Config.SlimeMovement)
-local PetPartyConfig = require(Shared.Config.PetParty)
-local PartyCodec = require(Shared.Pets.PartyCodec)
 
 local TutorialService = {}
 local started = false
 local slimeMovementService = nil
+local petPartyService = nil
 local heartbeatConnection = nil
 local playerAddedConnection = nil
 local playerRemovingConnection = nil
@@ -95,15 +94,26 @@ end
 
 local function starterPetIsEquipped(player)
 	local starterUid = player:GetAttribute(TutorialConfig.StarterPetUidAttributeName)
-	if type(starterUid) ~= "string" or starterUid == "" then
+	if type(starterUid) ~= "string" or starterUid == "" or not petPartyService then
 		return false
 	end
-	for _, uid in ipairs(PartyCodec.decode(player:GetAttribute(PetPartyConfig.AttributeName))) do
-		if uid == starterUid then
-			return true
-		end
+	return petPartyService.IsEquipped(player, starterUid) == true
+end
+
+local function reconcileStarterPetEquip(player)
+	if stageOf(player) ~= TutorialConfig.Stages.EquipStarterPet then
+		return false
 	end
-	return false
+	if player:GetAttribute(TutorialConfig.StarterPetGrantedAttributeName) ~= true then
+		return false
+	end
+	if not starterPetIsEquipped(player) then
+		return false
+	end
+	setStarterPetHitConfirmed(player, false)
+	setProgress(player, 0, 0)
+	setStage(player, TutorialConfig.Stages.PetCombatReady)
+	return true
 end
 
 local function ensureInputRemote()
@@ -193,6 +203,7 @@ local function bindPlayer(player)
 	else
 		setStage(player, existingStage)
 	end
+	reconcileStarterPetEquip(player)
 end
 
 local function modeForActiveStage(stage)
@@ -846,24 +857,19 @@ function TutorialService.CompleteStarterPetEquip(player, uid)
 	if type(uid) ~= "string" or uid == "" or uid ~= starterUid then
 		return false
 	end
-	if player:GetAttribute(TutorialConfig.StarterPetGrantedAttributeName) ~= true then
-		return false
-	end
-	setStarterPetHitConfirmed(player, false)
-	setStage(player, TutorialConfig.Stages.PetCombatReady)
-	setProgress(player, 0, 0)
-	return true
+	return reconcileStarterPetEquip(player)
 end
 
-function TutorialService.Start(slimeService)
+function TutorialService.Start(slimeService, partyService)
 	if started then
 		return
 	end
-	if not slimeService then
-		error("TutorialService requires SlimeMovementService.")
+	if not slimeService or not partyService then
+		error("TutorialService requires SlimeMovementService and PetPartyService.")
 	end
 	started = true
 	slimeMovementService = slimeService
+	petPartyService = partyService
 	inputRemote = ensureInputRemote()
 	inputRemoteConnection = inputRemote.OnServerEvent:Connect(handleInputMode)
 
@@ -894,6 +900,7 @@ function TutorialService.Start(slimeService)
 		local stepDt = accumulator
 		accumulator = 0
 		for _, player in ipairs(Players:GetPlayers()) do
+			reconcileStarterPetEquip(player)
 			updateOnboarding(player, stepDt)
 		end
 		updateCombatPresence(stepDt)
@@ -944,6 +951,7 @@ function TutorialService.Stop()
 	waveStartInProgress = false
 	inputRemote = nil
 	slimeMovementService = nil
+	petPartyService = nil
 end
 
 return TutorialService

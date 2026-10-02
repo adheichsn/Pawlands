@@ -21,7 +21,7 @@ StudioPetPreview.Start(PetPartyService, PetInventoryService, PetVitalsService, P
 SlimeMovementService.Start(PetCombatService, PetVitalsService, PetCombatFeedbackService)
 PetPartyMutationGuard.Start()
 CombatService.Start()
-TutorialService.Start(SlimeMovementService)
+TutorialService.Start(SlimeMovementService, PetPartyService)
 StarterPetService.Start(PetInventoryService, TutorialService)
 PetInventoryRemoteService.Start(PetInventoryService, PetPartyService, TutorialService, PetPartyMutationGuard)
 DialogueService.Start(TutorialService.HandleDialogueAction)
