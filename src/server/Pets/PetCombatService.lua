@@ -24,6 +24,7 @@ local partyService
 local vitalsService
 local inventoryService
 local progressionService
+local contributionService
 local stateByPlayer = {}
 local accumulator = 0
 local warnedMissingDamage = {}
@@ -381,12 +382,17 @@ local function processImpact(player, petSlot, slimeSlot)
 
 	local damage = damageForPet(player, entry.Uid)
 	local hitDirection = horizontalDirection(entry.Position, slimePosition)
+	local healthBefore = math.max(0, tonumber(entry.SlimeModel:GetAttribute("Health")) or 0)
 	local applied, health = SlimeHealth.ApplyDamage(entry.SlimeModel, damage, player, {
 		Tier = "Light",
 		Direction = hitDirection,
 		SourceType = "Pet",
 		SourceUid = entry.Uid,
 	})
+	if applied and contributionService then
+		local effectiveDamage = math.max(0, healthBefore - math.max(0, tonumber(health) or 0))
+		contributionService.RecordDamage(entry.SlimeModel, player, "Pet", entry.Uid, effectiveDamage)
+	end
 	if applied and RunService:IsStudio() then
 		print(string.format(
 			"[Pawlands PetCombat] %s pet %s hit %s for %d damage (%d/%d HP).",
@@ -560,7 +566,7 @@ function PetCombatService.GetCombatTargets(player)
 	return result
 end
 
-function PetCombatService.Start(petPartyService, petVitalsService, petInventoryService, petProgressionService)
+function PetCombatService.Start(petPartyService, petVitalsService, petInventoryService, petProgressionService, combatContributionService)
 	if started then
 		return
 	end
@@ -568,8 +574,9 @@ function PetCombatService.Start(petPartyService, petVitalsService, petInventoryS
 	vitalsService = petVitalsService
 	inventoryService = petInventoryService
 	progressionService = petProgressionService
-	if not partyService or not vitalsService or not inventoryService or not progressionService then
-		error("PetCombatService requires PetPartyService, PetVitalsService, PetInventoryService, and PetProgressionService.")
+	contributionService = combatContributionService
+	if not partyService or not vitalsService or not inventoryService or not progressionService or not contributionService then
+		error("PetCombatService requires PetPartyService, PetVitalsService, PetInventoryService, PetProgressionService, and CombatContributionService.")
 	end
 	started = true
 	local impactRemote = ensureImpactRemote()
@@ -626,6 +633,7 @@ function PetCombatService.Stop()
 	vitalsService = nil
 	inventoryService = nil
 	progressionService = nil
+	contributionService = nil
 	accumulator = 0
 	table.clear(warnedMissingDamage)
 end

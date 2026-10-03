@@ -17,6 +17,7 @@ local attackConnection
 local removingConnection
 local stateByPlayer = {}
 local handlerProgressionService
+local contributionService
 
 local function ensureRemote()
 	local pawlands = ReplicatedStorage:WaitForChild("Pawlands")
@@ -136,11 +137,16 @@ local function applyImpact(player, generation, aimDirection, preferredTarget, da
 	else
 		hitDirection = aim
 	end
+	local healthBefore = math.max(0, tonumber(target:GetAttribute("Health")) or 0)
 	local applied, health = SlimeHealth.ApplyDamage(target, damage, player, {
 		Tier = feedbackTier,
 		Direction = hitDirection,
 		ActionType = actionType,
 	})
+	if applied and contributionService then
+		local effectiveDamage = math.max(0, healthBefore - math.max(0, tonumber(health) or 0))
+		contributionService.RecordDamage(target, player, "Player", nil, effectiveDamage)
+	end
 	if applied and RunService:IsStudio() then
 		print(string.format(
 			"[Pawlands Combat] %s hit %s for %d damage (%d/%d HP).",
@@ -201,14 +207,15 @@ local function processAttack(player, actionType, comboIndex, aimDirection, prefe
 	end)
 end
 
-function CombatService.Start(progressService)
+function CombatService.Start(progressService, combatContributionService)
 	if started then
 		return
 	end
-	if not progressService then
-		error("CombatService requires HandlerProgressionService.")
+	if not progressService or not combatContributionService then
+		error("CombatService requires HandlerProgressionService and CombatContributionService.")
 	end
 	handlerProgressionService = progressService
+	contributionService = combatContributionService
 	started = true
 	local remote = ensureRemote()
 	attackConnection = remote.OnServerEvent:Connect(processAttack)
@@ -232,6 +239,7 @@ function CombatService.Stop()
 	end
 	table.clear(stateByPlayer)
 	handlerProgressionService = nil
+	contributionService = nil
 end
 
 return CombatService
