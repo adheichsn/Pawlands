@@ -40,6 +40,17 @@ p18 = Dragon, Lv1,  Favorite=false
 
 Both survive save/load independently. They may coexist in inventory, but the existing one-species-per-party validation still prevents equipping both Dragons at once.
 
+
+## Studio development commands
+
+`4A.1.1.1 — Dev Profile Reset & Inspect Commands` adds Studio-only profile QA commands behind `server/Config/Development.lua > EnableProfileCommands`. They never create runtime GUI and they only act on the Player issuing the command.
+
+- `!profileinspect` prints Handler progression, Pet UID records, active party, `NextSequence`, and Tutorial/starter state from the current canonical server profile. Pet output is capped at 50 records to avoid runaway console spam.
+- `!profilereset` is intentionally non-destructive by itself and prints the confirmation syntax.
+- `!profilereset CONFIRM` atomically resets the issuing Player to the current default schema, releases the profile session lock, and kicks the Player so every dependent service reloads from a fresh profile on rejoin.
+- In default Studio memory mode the reset only clears the in-memory QA record. With Studio DataStore access explicitly enabled through `UseDataStoreInStudio = true`, the same command resets the persistent QA record owned by the current server session.
+- A reset refuses to overwrite a profile whose session lock belongs to another server.
+
 ## Explicitly not included
 
 - No Coins, Diamonds, Slime Core, or item persistence yet.

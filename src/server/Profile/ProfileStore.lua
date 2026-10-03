@@ -182,4 +182,47 @@ function ProfileStore.Release(userId, data)
 	return write(userId, data, true)
 end
 
+function ProfileStore.ResetOwned(userId)
+	local numericUserId = tonumber(userId)
+	if not numericUserId then
+		return false, "Invalid UserId."
+	end
+
+	if not persistent then
+		memoryRecords[numericUserId] = nil
+		return true, nil
+	end
+
+	local blockedReason
+	local ok, result = retry(Config.SaveAttempts, function()
+		return dataStore:UpdateAsync(keyFor(numericUserId), function(current)
+			local record, reason = Schema.NormalizeRecord(current)
+			if not record then
+				blockedReason = reason
+				return nil
+			end
+			local currentSession = record.Session
+			if currentSession
+				and currentSession.JobId ~= ""
+				and currentSession.JobId ~= sessionId()
+			then
+				blockedReason = "Profile session lock is owned by another server."
+				return nil
+			end
+			return {
+				SchemaVersion = Config.SchemaVersion,
+				Session = nil,
+				Data = Schema.NewData(),
+			}
+		end)
+	end)
+	if blockedReason then
+		return false, blockedReason
+	end
+	if not ok then
+		return false, "DataStore reset failed: " .. tostring(result)
+	end
+	return true, nil
+end
+
 return ProfileStore

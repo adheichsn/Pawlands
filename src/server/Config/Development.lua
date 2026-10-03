@@ -4,4 +4,5 @@ return table.freeze({
 	EnablePetPreview = false,
 	PreviewParty = table.freeze({ "Bunny", "Cat", "Dog", "Dragon" }),
 	EnablePetCommands = true,
+	EnableProfileCommands = true,
 })

@@ -1,5 +1,6 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.Profile)
@@ -371,6 +372,45 @@ function PlayerProfileService.SaveNow(player)
 		return false, "Player profile is not ready."
 	end
 	return saveState(player, state, false)
+end
+
+function PlayerProfileService.ResetForDevelopment(player)
+	if not RunService:IsStudio() then
+		return false, "Development profile reset is Studio-only."
+	end
+	if not validPlayer(player) then
+		return false, "Invalid Player."
+	end
+	local state = stateFor(player)
+	if not state or state.Status ~= "Ready" or state.Releasing then
+		return false, "Player profile is not ready for reset."
+	end
+
+	local waitDeadline = os.clock() + 12
+	while state.Saving and os.clock() < waitDeadline do
+		task.wait(0.05)
+	end
+	if state.Saving then
+		return false, "Timed out waiting for the current profile save."
+	end
+
+	-- Freeze normal mutation/autosave before atomically replacing the owned record.
+	-- On success the Player is expected to be kicked immediately; clearing the state
+	-- prevents PlayerRemoving from release-saving the old profile back over the reset.
+	state.Releasing = true
+	local ok, reason = Store.ResetOwned(player.UserId)
+	if not ok then
+		state.Releasing = false
+		return false, reason
+	end
+
+	disconnectStateConnections(state)
+	state.Status = "Reset"
+	state.Profile = nil
+	states[player] = nil
+	player:SetAttribute(Config.ReadyAttributeName, false)
+	player:SetAttribute(Config.FailureAttributeName, false)
+	return true, nil
 end
 
 function PlayerProfileService.Start()
