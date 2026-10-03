@@ -8,6 +8,7 @@ local ProgressionMath = require(Shared.Progression.ProgressionMath)
 local HandlerProgressionService = {}
 local started = false
 local stateByPlayer = {}
+local profileService = nil
 local addedConnection = nil
 local removingConnection = nil
 
@@ -47,7 +48,12 @@ local function makeSnapshot(totalExperience)
 end
 
 local function initializePlayer(player)
-	local snapshot = makeSnapshot(0)
+	local profile = profileService and profileService.AwaitReady(player)
+	if not profile or player.Parent ~= Players then
+		return
+	end
+	local saved = profileService.GetHandlerSnapshot(player) or {}
+	local snapshot = makeSnapshot(saved.Experience or 0)
 	stateByPlayer[player] = snapshot
 	publish(player, snapshot)
 end
@@ -69,6 +75,10 @@ function HandlerProgressionService.SetExperience(player, totalExperience)
 		return nil, "Handler experience must be a finite non-negative number."
 	end
 	local snapshot = makeSnapshot(requested)
+	local persisted, persistReason = profileService.SetHandlerProgression(player, snapshot.Level, snapshot.Experience)
+	if not persisted then
+		return nil, persistReason
+	end
 	stateByPlayer[player] = snapshot
 	publish(player, snapshot)
 	return table.clone(snapshot), nil
@@ -109,10 +119,14 @@ function HandlerProgressionService.GetMaxHealthMultiplier(player)
 	return ProgressionMath.GrowthMultiplier(Config.MaxHealthGrowthPerLevel, snapshot.Level, Config)
 end
 
-function HandlerProgressionService.Start()
+function HandlerProgressionService.Start(playerProfileService)
 	if started then
 		return
 	end
+	if not playerProfileService then
+		error("HandlerProgressionService requires PlayerProfileService.")
+	end
+	profileService = playerProfileService
 	started = true
 	addedConnection = Players.PlayerAdded:Connect(initializePlayer)
 	removingConnection = Players.PlayerRemoving:Connect(function(player)
@@ -143,6 +157,7 @@ function HandlerProgressionService.Stop()
 		player:SetAttribute(Config.ExperienceToNextLevelAttributeName, nil)
 	end
 	table.clear(stateByPlayer)
+	profileService = nil
 end
 
 return HandlerProgressionService

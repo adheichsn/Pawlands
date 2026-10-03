@@ -38,7 +38,7 @@ Authored notification preview tiles are hidden at runtime; only a cloned `TextTi
 ## Scope boundaries
 
 - Pet rarity/base stats are consumed from the existing 3B.1 catalog; this stage does not change those values.
-- Starter ownership is session-only because persistent Inventory/Profile storage is not part of the current Pawlands foundation.
+- Starter ownership, exact starter Pet UID/species, and tutorial stage/checkpoint are persisted by `4A.1.1 — Player Profile & Persistence Foundation`.
 - No auto-equip, Coins, EXP, loot, or general combat rewards are added.
 - The Pet combat lesson reuses the existing tutorial encounter and frozen Pet combat systems; it does not create a second combat/wave runtime.
 - Existing Player combat damage, Slime combat tuning, Pet combat logic, KO, and reward systems are unchanged.

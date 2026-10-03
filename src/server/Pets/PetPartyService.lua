@@ -9,6 +9,7 @@ local Assets = require(Shared.Pets.PetAssets)
 local PetPartyService = {}
 local parties = {}
 local inventoryService
+local profileService
 local started = false
 
 local function validPlayer(player)
@@ -71,6 +72,10 @@ function PetPartyService.SetParty(player, requested)
 			return false, assetReason
 		end
 	end
+	local persisted, persistReason = profileService.SetParty(player, party)
+	if not persisted then
+		return false, persistReason
+	end
 	parties[player] = party
 	publish(player, party)
 	return true, nil
@@ -108,19 +113,28 @@ function PetPartyService.Unequip(player, uid)
 	return false, "Pet is not equipped: " .. tostring(uid)
 end
 
-function PetPartyService.Start(petInventoryService)
+function PetPartyService.Start(petInventoryService, playerProfileService)
 	if started then
 		return
 	end
 	inventoryService = petInventoryService
-	if not inventoryService then
-		error("PetPartyService requires PetInventoryService.")
+	profileService = playerProfileService
+	if not inventoryService or not profileService then
+		error("PetPartyService requires PetInventoryService and PlayerProfileService.")
 	end
 	started = true
 	local function added(player)
-		if not parties[player] then
+		local profile = profileService.AwaitReady(player)
+		if not profile or player.Parent ~= Players then
+			return
+		end
+		local savedParty = profileService.GetPartySnapshot(player)
+		local ok, reason = PetPartyService.SetParty(player, savedParty)
+		if not ok then
+			warn("[Pawlands Party] Persisted party could not be restored for " .. player.Name .. ": " .. tostring(reason))
 			parties[player] = {}
-			player:SetAttribute(Config.AttributeName, "")
+			profileService.SetParty(player, {})
+			publish(player, {})
 		end
 	end
 	Players.PlayerAdded:Connect(added)

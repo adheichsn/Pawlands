@@ -12,6 +12,7 @@ local playerAddedConnection = nil
 local playerRemovingConnection = nil
 local inventoryService = nil
 local tutorialService = nil
+local profileService = nil
 local requestInFlight = {}
 
 local function ensureRemote()
@@ -41,6 +42,12 @@ local function ensureRemote()
 end
 
 local function initializePlayer(player)
+	if profileService then
+		local profile = profileService.AwaitReady(player)
+		if not profile or player.Parent ~= Players then
+			return
+		end
+	end
 	if player:GetAttribute(TutorialConfig.StarterPetGrantedAttributeName) == nil then
 		player:SetAttribute(TutorialConfig.StarterPetGrantedAttributeName, false)
 	end
@@ -110,16 +117,17 @@ local function chooseStarterPet(player, requestedSpecies)
 	reply(player, true, pet.SpeciesId, pet.Uid, nil)
 end
 
-function StarterPetService.Start(petInventoryService, tutorialProgressionService)
+function StarterPetService.Start(petInventoryService, tutorialProgressionService, playerProfileService)
 	if started then
 		return
 	end
-	if not petInventoryService or not tutorialProgressionService then
-		error("StarterPetService requires PetInventoryService and TutorialService.")
+	if not petInventoryService or not tutorialProgressionService or not playerProfileService then
+		error("StarterPetService requires PetInventoryService, TutorialService, and PlayerProfileService.")
 	end
 	started = true
 	inventoryService = petInventoryService
 	tutorialService = tutorialProgressionService
+	profileService = playerProfileService
 	remote = ensureRemote()
 	remoteConnection = remote.OnServerEvent:Connect(chooseStarterPet)
 
@@ -153,6 +161,7 @@ function StarterPetService.Stop()
 	remote = nil
 	inventoryService = nil
 	tutorialService = nil
+	profileService = nil
 end
 
 return StarterPetService

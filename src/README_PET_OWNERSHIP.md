@@ -1,16 +1,16 @@
-# Pawlands — Session Pet Ownership & Party Patch
+# Pawlands — Pet Ownership & Party Foundation
 
 This patch extends the existing pet-follow foundation without changing its client movement, authored-pivot correction, yaw calibration, 2×2 formation, or 1.5×1.5 ground Blockcast.
 
 ## Scope
 
-- Session-only pet inventory with one unique `Uid` per pet instance (`p1`, `p2`, ...).
+- Pet inventory uses one unique persistent `Uid` per pet instance (`p1`, `p2`, ...).
 - Duplicate species are allowed in inventory so future hatch/variant systems can own multiple copies.
 - Equipped party remains capped at **4**.
 - Equipped party allows only **one pet per `SpeciesId`**.
 - Equip/unequip and full party changes validate ownership on the server.
 - Client follow still receives the existing visual pet ids, so follow code does not need to change.
-- No GUI, remotes, persistence, hatch, combat, tutorial, or starter-pet acquisition is added here.
+- The original ownership patch did not add persistence; `4A.1.1` now persists exact UID ownership and active party state without changing the ownership rules.
 
 ## Studio commands
 
@@ -37,4 +37,4 @@ The existing `!pets` commands remain available as Studio convenience commands. W
 
 ## Important runtime boundary
 
-The automatic Studio preview is testing only. Live servers still start with an empty session inventory and empty party. How the first real pet is obtained remains intentionally undecided for now.
+The automatic Studio preview remains testing only. Live ownership now hydrates from the player profile; a genuinely new profile starts empty until the existing tutorial starter flow grants its first Pet.

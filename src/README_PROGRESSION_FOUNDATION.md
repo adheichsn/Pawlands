@@ -1,6 +1,6 @@
 # 4A.1 — Progression Foundation
 
-This stage adds the server-authoritative data/math foundation for Pet Level and Handler Level without adding combat rewards, currency, UI, persistence, Mastery, Ascension, AFK Training, or leaderboard behavior.
+This stage adds the server-authoritative data/math foundation for Pet Level and Handler Level without adding combat rewards, currency, UI, Mastery, Ascension, AFK Training, or leaderboard behavior. Persistence is supplied by the follow-up `4A.1.1` profile foundation.
 
 ## Pet progression
 
@@ -48,7 +48,7 @@ Handler progression is published through Player attributes:
 
 `HandlerProgressionService` provides trusted `GetSnapshot`, `SetExperience`, `AddExperience`, and growth-multiplier accessors per Player.
 
-The current project still has no Profile/DataStore foundation. Progression in this stage is session-authoritative only; adding persistence is intentionally not hidden inside this patch.
+The follow-up `4A.1.1 — Player Profile & Persistence Foundation` now persists cumulative Pet/Handler EXP and reconciled levels. The progression math/API contract in this document remains unchanged.
 
 ## Explicitly not included
 

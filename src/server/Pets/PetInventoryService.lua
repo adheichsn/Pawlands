@@ -6,6 +6,7 @@ local Rules = require(Shared.Pets.PartyRules)
 
 local PetInventoryService = {}
 local inventories = {}
+local profileService
 local started = false
 
 local function validPlayer(player)
@@ -17,10 +18,32 @@ local function getState(player)
 	if state or not validPlayer(player) then
 		return state
 	end
+	if not profileService then
+		return nil
+	end
 
-	-- PlayerAdded listeners run in separate tasks, so dependent services must not
-	-- assume this service's listener has initialized the session first.
-	state = { Pets = {}, Order = {}, NextSequence = 0 }
+	-- Hydrate lazily from the loaded canonical profile so dependent services do
+	-- not rely on PlayerAdded callback ordering.
+	local profile, reason = profileService.AwaitReady(player)
+	if not profile then
+		if player.Parent == Players then
+			warn("[Pawlands Inventory] Profile unavailable for " .. player.Name .. ": " .. tostring(reason))
+		end
+		return nil
+	end
+	local saved = profileService.GetPetInventorySnapshot(player) or {}
+	state = { Pets = {}, Order = {}, NextSequence = math.max(0, math.floor(tonumber(saved.NextSequence) or 0)) }
+	local records = type(saved.Records) == "table" and saved.Records or {}
+	for _, uid in ipairs(type(saved.Order) == "table" and saved.Order or {}) do
+		local pet = records[uid]
+		if type(uid) == "string" and type(pet) == "table" and Catalog.Pets[pet.PetId] then
+			local copy = table.clone(pet)
+			copy.Level = math.max(1, math.floor(tonumber(copy.Level) or 1))
+			copy.Experience = math.max(0, math.floor((tonumber(copy.Experience) or 0) + 0.5))
+			state.Pets[uid] = copy
+			table.insert(state.Order, uid)
+		end
+	end
 	inventories[player] = state
 	return state
 end
@@ -80,7 +103,12 @@ function PetInventoryService.ToggleFavorite(player, uid)
 	if not pet then
 		return nil, "Pet is not owned: " .. tostring(uid)
 	end
-	pet.Favorite = pet.Favorite ~= true
+	local nextFavorite = pet.Favorite ~= true
+	local persisted, persistReason = profileService.SetPetFavorite(player, uid, nextFavorite)
+	if not persisted then
+		return nil, persistReason
+	end
+	pet.Favorite = nextFavorite
 	return clonePet(pet), nil
 end
 
@@ -104,12 +132,18 @@ function PetInventoryService.SetProgressionState(player, uid, level, experience)
 	then
 		return nil, "Pet experience must be a finite non-negative number."
 	end
-	pet.Level = math.max(1, math.floor(nextLevel))
-	pet.Experience = math.max(0, math.floor(nextExperience + 0.5))
+	local normalizedLevel = math.max(1, math.floor(nextLevel))
+	local normalizedExperience = math.max(0, math.floor(nextExperience + 0.5))
+	local persisted, persistReason = profileService.SetPetProgression(player, uid, normalizedLevel, normalizedExperience)
+	if not persisted then
+		return nil, persistReason
+	end
+	pet.Level = normalizedLevel
+	pet.Experience = normalizedExperience
 	return clonePet(pet), nil
 end
 
--- Session-only grant API. Persistence and hatch acquisition are intentionally not part of this patch.
+-- Trusted acquisition API. Every granted Pet is mirrored into the persistent exact-UID profile; hatch logic remains a later feature.
 function PetInventoryService.Grant(player, requestedPet, variant)
 	if not validPlayer(player) then
 		return nil, "Player is not in this server."
@@ -126,7 +160,9 @@ function PetInventoryService.Grant(player, requestedPet, variant)
 	if ownedPetCount(state) >= InventoryConfig.PetCapacity then
 		return nil, string.format("Pet inventory is full (%d/%d).", InventoryConfig.PetCapacity, InventoryConfig.PetCapacity)
 	end
-	state.NextSequence += 1
+	repeat
+		state.NextSequence += 1
+	until state.Pets["p" .. tostring(state.NextSequence)] == nil
 	local uid = "p" .. tostring(state.NextSequence)
 	local pet = {
 		Uid = uid,
@@ -137,6 +173,11 @@ function PetInventoryService.Grant(player, requestedPet, variant)
 		Level = 1,
 		Experience = 0,
 	}
+	local persisted, persistReason = profileService.AddPet(player, pet, state.NextSequence)
+	if not persisted then
+		state.NextSequence -= 1
+		return nil, persistReason
+	end
 	state.Pets[uid] = pet
 	table.insert(state.Order, uid)
 	return clonePet(pet), nil
@@ -148,15 +189,23 @@ function PetInventoryService.Clear(player)
 	if not state then
 		return false, "Pet inventory is not initialized."
 	end
+	local persisted, persistReason = profileService.ClearPets(player)
+	if not persisted then
+		return false, persistReason
+	end
 	table.clear(state.Pets)
 	table.clear(state.Order)
 	return true, nil
 end
 
-function PetInventoryService.Start()
+function PetInventoryService.Start(playerProfileService)
 	if started then
 		return
 	end
+	if not playerProfileService then
+		error("PetInventoryService requires PlayerProfileService.")
+	end
+	profileService = playerProfileService
 	started = true
 	local function added(player)
 		getState(player)

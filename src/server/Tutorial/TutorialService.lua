@@ -11,6 +11,7 @@ local TutorialService = {}
 local started = false
 local slimeMovementService = nil
 local petPartyService = nil
+local playerProfileService = nil
 local heartbeatConnection = nil
 local playerAddedConnection = nil
 local playerRemovingConnection = nil
@@ -142,6 +143,12 @@ local function ensureInputRemote()
 end
 
 local function bindPlayer(player)
+	if playerProfileService then
+		local profile = playerProfileService.AwaitReady(player)
+		if not profile or player.Parent ~= Players then
+			return
+		end
+	end
 	local existingStage = stageOf(player)
 	local state = onboardingState(player)
 	state.AttackLessonCompleted = existingStage == TutorialConfig.Stages.InCombat
@@ -860,16 +867,17 @@ function TutorialService.CompleteStarterPetEquip(player, uid)
 	return reconcileStarterPetEquip(player)
 end
 
-function TutorialService.Start(slimeService, partyService)
+function TutorialService.Start(slimeService, partyService, profileService)
 	if started then
 		return
 	end
-	if not slimeService or not partyService then
-		error("TutorialService requires SlimeMovementService and PetPartyService.")
+	if not slimeService or not partyService or not profileService then
+		error("TutorialService requires SlimeMovementService, PetPartyService, and PlayerProfileService.")
 	end
 	started = true
 	slimeMovementService = slimeService
 	petPartyService = partyService
+	playerProfileService = profileService
 	inputRemote = ensureInputRemote()
 	inputRemoteConnection = inputRemote.OnServerEvent:Connect(handleInputMode)
 
@@ -952,6 +960,7 @@ function TutorialService.Stop()
 	inputRemote = nil
 	slimeMovementService = nil
 	petPartyService = nil
+	playerProfileService = nil
 end
 
 return TutorialService

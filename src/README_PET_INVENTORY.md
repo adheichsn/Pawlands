@@ -19,7 +19,7 @@ Current behavior:
 - Inventory and starter-choice modal ScreenGuis ignore the Roblox inset so their authored dimmer reaches the top viewport edge.
 - `AutoOptions`, `SellAll`, and `Configuration` are hidden for the current minimal Inventory pass.
 - Items are not implemented yet; the authored Items tab resolves to the empty state.
-- Inventory/favorite state is session-only until persistence is introduced.
+- Inventory ownership, favorite state, exact Pet UIDs, and active party are persisted by `4A.1.1 — Player Profile & Persistence Foundation`.
 
 Combat roster lock:
 - Inventory remains per-player and never pauses or changes the server simulation for other players. Opening it no longer freezes local Walk/Run/Jump; the Inventory interaction lock still blocks combat M1 and overlapping modal interactions.
