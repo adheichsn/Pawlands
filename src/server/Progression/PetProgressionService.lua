@@ -21,6 +21,11 @@ local function finiteNonNegative(value)
 	return value
 end
 
+local function bumpRevision(player)
+	local current = tonumber(player:GetAttribute(Config.RevisionAttributeName)) or 0
+	player:SetAttribute(Config.RevisionAttributeName, math.max(0, math.floor(current)) + 1)
+end
+
 local function snapshotForPet(pet)
 	if not pet then
 		return nil
@@ -76,6 +81,7 @@ function PetProgressionService.SetExperience(player, uid, totalExperience)
 	if not updated then
 		return nil, reason
 	end
+	bumpRevision(player)
 	return snapshotForPet(updated), nil
 end
 

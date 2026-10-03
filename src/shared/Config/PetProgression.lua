@@ -1,6 +1,7 @@
 return table.freeze({
 	InitialLevel = 1,
 	MaxLevel = 50,
+	RevisionAttributeName = "PawlandsPetProgressionRevision",
 
 	-- Permanent level growth is additive against the authored species base stat.
 	-- Lv1 therefore preserves the current combat baseline exactly.
