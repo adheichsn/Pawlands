@@ -10,6 +10,7 @@ local PetVitalsService = {}
 local started = false
 local inventoryService
 local partyService
+local progressionService
 local stateByPlayer = {}
 local heartbeatConnection
 local addedConnection
@@ -81,7 +82,7 @@ local function getPlayerState(player)
 	return state
 end
 
-local function maxHealthForPet(pet)
+local function baseMaxHealthForPet(pet)
 	local petId = pet and tostring(pet.PetId or "") or ""
 	local definition = petId ~= "" and Catalog.Pets[petId] or nil
 	local configured = definition and tonumber(definition.BaseMaxHealth)
@@ -98,6 +99,35 @@ local function maxHealthForPet(pet)
 		warnedMissingMaxHealth[warningKey] = true
 	end
 	return math.max(1, tonumber(Config.FallbackMaxHealth) or 1)
+end
+
+local function maxHealthForPet(player, uid, pet)
+	local baseMaxHealth = baseMaxHealthForPet(pet)
+	local multiplier = progressionService and progressionService.GetMaxHealthMultiplier(player, uid) or 1
+	return math.max(1, math.floor(baseMaxHealth * multiplier + 0.5))
+end
+
+local function reconcileMaxHealth(player, uid, pet, vitals)
+	local nextMaxHealth = maxHealthForPet(player, uid, pet)
+	local oldMaxHealth = math.max(1, tonumber(vitals.MaxHealth) or nextMaxHealth)
+	if math.abs(nextMaxHealth - oldMaxHealth) <= 0.001 then
+		return false
+	end
+
+	local healthRatio = math.clamp((tonumber(vitals.Health) or 0) / oldMaxHealth, 0, 1)
+	local recoveryRatio = vitals.RecoveryStartHealth ~= nil
+		and math.clamp((tonumber(vitals.RecoveryStartHealth) or 0) / oldMaxHealth, 0, 1)
+		or nil
+	vitals.MaxHealth = nextMaxHealth
+	if vitals.KO then
+		vitals.Health = 0
+	else
+		vitals.Health = math.clamp(nextMaxHealth * healthRatio, 0, nextMaxHealth)
+	end
+	if recoveryRatio ~= nil then
+		vitals.RecoveryStartHealth = math.clamp(nextMaxHealth * recoveryRatio, 0, nextMaxHealth)
+	end
+	return true
 end
 
 local function cloneVitals(vitals)
@@ -120,9 +150,12 @@ local function ensureVitals(player, uid)
 	end
 	local vitals = playerState.Pets[uid]
 	if vitals then
+		if reconcileMaxHealth(player, uid, pet, vitals) then
+			playerState.Published = nil
+		end
 		return vitals, nil
 	end
-	local maxHealth = maxHealthForPet(pet)
+	local maxHealth = maxHealthForPet(player, uid, pet)
 	vitals = {
 		Uid = uid,
 		PetId = pet.PetId,
@@ -261,6 +294,10 @@ local function reconcilePlayer(player, clock)
 	end
 	local changed = false
 	for uid, vitals in pairs(playerState.Pets) do
+		local pet = inventoryService and inventoryService.GetPet(player, uid) or nil
+		if pet and reconcileMaxHealth(player, uid, pet, vitals) then
+			changed = true
+		end
 		if advancePassiveRecovery(vitals, clock) then
 			changed = true
 		end
@@ -452,14 +489,15 @@ function PetVitalsService.Clear(player)
 	end
 end
 
-function PetVitalsService.Start(petInventoryService, petPartyService)
+function PetVitalsService.Start(petInventoryService, petPartyService, petProgressionService)
 	if started then
 		return
 	end
 	inventoryService = petInventoryService
 	partyService = petPartyService
-	if not inventoryService or not partyService then
-		error("PetVitalsService requires PetInventoryService and PetPartyService.")
+	progressionService = petProgressionService
+	if not inventoryService or not partyService or not progressionService then
+		error("PetVitalsService requires PetInventoryService, PetPartyService, and PetProgressionService.")
 	end
 	started = true
 
@@ -514,6 +552,7 @@ function PetVitalsService.Stop()
 	table.clear(stateByPlayer)
 	inventoryService = nil
 	partyService = nil
+	progressionService = nil
 	accumulator = 0
 	table.clear(warnedMissingMaxHealth)
 end

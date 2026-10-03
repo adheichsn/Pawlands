@@ -8,9 +8,12 @@ local ProgressionMath = require(Shared.Progression.ProgressionMath)
 local HandlerProgressionService = {}
 local started = false
 local stateByPlayer = {}
+local characterConnections = {}
 local profileService = nil
 local addedConnection = nil
 local removingConnection = nil
+
+local BASE_MAX_HEALTH_ATTRIBUTE = "PawlandsHandlerBaseMaxHealth"
 
 local function validPlayer(player)
 	return typeof(player) == "Instance" and player:IsA("Player") and player.Parent == Players
@@ -47,6 +50,75 @@ local function makeSnapshot(totalExperience)
 	}
 end
 
+local function getHumanoid(character)
+	if not character then
+		return nil
+	end
+	local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+	if humanoid then
+		return humanoid
+	end
+	local candidate = character:WaitForChild("Humanoid", 5)
+	return candidate and candidate:IsA("Humanoid") and candidate or nil
+end
+
+local function authoredBaseMaxHealth(humanoid)
+	local stored = tonumber(humanoid:GetAttribute(BASE_MAX_HEALTH_ATTRIBUTE))
+	if stored and stored > 0 and stored == stored and stored ~= math.huge then
+		return stored
+	end
+	local current = tonumber(humanoid.MaxHealth)
+	if not current or current <= 0 or current ~= current or current == math.huge then
+		current = 100
+	end
+	humanoid:SetAttribute(BASE_MAX_HEALTH_ATTRIBUTE, current)
+	return current
+end
+
+local function applyCharacterHealth(player, character, preserveRatio)
+	if not started or player.Parent ~= Players or player.Character ~= character then
+		return
+	end
+	local snapshot = stateByPlayer[player]
+	if not snapshot then
+		return
+	end
+	local humanoid = getHumanoid(character)
+	if not humanoid or player.Character ~= character then
+		return
+	end
+
+	local baseMaxHealth = authoredBaseMaxHealth(humanoid)
+	local multiplier = ProgressionMath.GrowthMultiplier(Config.MaxHealthGrowthPerLevel, snapshot.Level, Config)
+	local nextMaxHealth = math.max(1, math.floor(baseMaxHealth * multiplier + 0.5))
+	local oldMaxHealth = math.max(1, tonumber(humanoid.MaxHealth) or baseMaxHealth)
+	local oldHealth = math.clamp(tonumber(humanoid.Health) or 0, 0, oldMaxHealth)
+	local healthRatio = oldHealth / oldMaxHealth
+
+	humanoid.MaxHealth = nextMaxHealth
+	if oldHealth <= 0 then
+		humanoid.Health = 0
+	elseif preserveRatio then
+		humanoid.Health = math.clamp(nextMaxHealth * healthRatio, 0, nextMaxHealth)
+	else
+		-- A newly spawned Handler starts at the full MaxHealth granted by the
+		-- already-loaded level. Level changes during life preserve health ratio.
+		humanoid.Health = nextMaxHealth
+	end
+end
+
+local function connectCharacter(player)
+	if characterConnections[player] then
+		characterConnections[player]:Disconnect()
+	end
+	characterConnections[player] = player.CharacterAdded:Connect(function(character)
+		task.defer(applyCharacterHealth, player, character, false)
+	end)
+	if player.Character then
+		task.defer(applyCharacterHealth, player, player.Character, false)
+	end
+end
+
 local function initializePlayer(player)
 	local profile = profileService and profileService.AwaitReady(player)
 	if not profile or player.Parent ~= Players then
@@ -56,6 +128,7 @@ local function initializePlayer(player)
 	local snapshot = makeSnapshot(saved.Experience or 0)
 	stateByPlayer[player] = snapshot
 	publish(player, snapshot)
+	connectCharacter(player)
 end
 
 function HandlerProgressionService.GetSnapshot(player)
@@ -81,6 +154,9 @@ function HandlerProgressionService.SetExperience(player, totalExperience)
 	end
 	stateByPlayer[player] = snapshot
 	publish(player, snapshot)
+	if player.Character then
+		applyCharacterHealth(player, player.Character, true)
+	end
 	return table.clone(snapshot), nil
 end
 
@@ -131,6 +207,10 @@ function HandlerProgressionService.Start(playerProfileService)
 	addedConnection = Players.PlayerAdded:Connect(initializePlayer)
 	removingConnection = Players.PlayerRemoving:Connect(function(player)
 		stateByPlayer[player] = nil
+		if characterConnections[player] then
+			characterConnections[player]:Disconnect()
+			characterConnections[player] = nil
+		end
 	end)
 	for _, player in ipairs(Players:GetPlayers()) do
 		initializePlayer(player)
@@ -149,6 +229,10 @@ function HandlerProgressionService.Stop()
 	if removingConnection then
 		removingConnection:Disconnect()
 		removingConnection = nil
+	end
+	for player, connection in pairs(characterConnections) do
+		connection:Disconnect()
+		characterConnections[player] = nil
 	end
 	for _, player in ipairs(Players:GetPlayers()) do
 		player:SetAttribute(Config.LevelAttributeName, nil)

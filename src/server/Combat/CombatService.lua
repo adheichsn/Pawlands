@@ -16,6 +16,7 @@ local started = false
 local attackConnection
 local removingConnection
 local stateByPlayer = {}
+local handlerProgressionService
 
 local function ensureRemote()
 	local pawlands = ReplicatedStorage:WaitForChild("Pawlands")
@@ -120,7 +121,10 @@ local function applyImpact(player, generation, aimDirection, preferredTarget, da
 		return
 	end
 
-	local damage = math.max(1, math.floor(Config.Damage * damageMultiplier + 0.5))
+	local handlerMultiplier = handlerProgressionService
+		and handlerProgressionService.GetDamageMultiplier(player)
+		or 1
+	local damage = math.max(1, math.floor(Config.Damage * handlerMultiplier * damageMultiplier + 0.5))
 	local targetPosition = target:GetPivot().Position
 	local hitDirection = Vector3.new(
 		targetPosition.X - playerState.Root.Position.X,
@@ -197,10 +201,14 @@ local function processAttack(player, actionType, comboIndex, aimDirection, prefe
 	end)
 end
 
-function CombatService.Start()
+function CombatService.Start(progressService)
 	if started then
 		return
 	end
+	if not progressService then
+		error("CombatService requires HandlerProgressionService.")
+	end
+	handlerProgressionService = progressService
 	started = true
 	local remote = ensureRemote()
 	attackConnection = remote.OnServerEvent:Connect(processAttack)
@@ -223,6 +231,7 @@ function CombatService.Stop()
 		removingConnection = nil
 	end
 	table.clear(stateByPlayer)
+	handlerProgressionService = nil
 end
 
 return CombatService

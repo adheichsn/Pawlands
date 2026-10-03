@@ -18,7 +18,7 @@ Pet growth data is additive against the authored base stat:
 - Damage multiplier: `1 + 0.032 * (Level - 1)`.
 - Max HP multiplier: `1 + 0.024 * (Level - 1)`.
 - Lv1 therefore preserves the current Pet combat baseline exactly.
-- The shared math and trusted server APIs are available now; applying level growth to live combat/presentation remains part of the later Pet Level runtime stage.
+- `4A.1.2` now applies those multipliers to authoritative Pet damage and Max HP at runtime. Pet health-ratio is preserved when Max HP changes; KO Pets remain at `0` HP until their existing recovery path completes.
 
 ## Handler progression
 
@@ -33,7 +33,7 @@ Handler growth data is intentionally light:
 
 - Player damage multiplier data: `1 + 0.005 * (Level - 1)`.
 - Player max HP multiplier data: `1 + 0.0075 * (Level - 1)`.
-- This patch does not yet apply those multipliers to Player combat/health; that belongs to the Handler runtime stage.
+- `4A.1.2` now applies those multipliers to authoritative Player M1 damage and Humanoid MaxHealth. A living Handler preserves current health percentage when level-derived MaxHealth changes; a newly spawned character starts at the full MaxHealth for the loaded Handler level.
 
 Handler progression is published through Player attributes:
 
@@ -49,6 +49,17 @@ Handler progression is published through Player attributes:
 `HandlerProgressionService` provides trusted `GetSnapshot`, `SetExperience`, `AddExperience`, and growth-multiplier accessors per Player.
 
 The follow-up `4A.1.1 — Player Profile & Persistence Foundation` now persists cumulative Pet/Handler EXP and reconciled levels. The progression math/API contract in this document remains unchanged.
+
+## 4A.1.2 — Progression Stat Runtime
+
+- Pet damage resolves from authored `PetCatalog.BaseDamage` multiplied by the exact UID's current Pet Level multiplier.
+- Pet Max HP resolves from authored `PetCatalog.BaseMaxHealth` multiplied by the exact UID's current Pet Level multiplier.
+- Handler M1/running-attack base damage resolves from `PlayerCombat.Damage` multiplied by current Handler Level growth before the authored action multiplier.
+- Handler Max HP resolves from the character's authored Humanoid MaxHealth captured at spawn, then applies Handler Level growth.
+- Level-derived stats are calculated at runtime and are not duplicated into the persistent profile.
+- Attack cadence is unchanged by level.
+- Lv1 remains byte-for-byte-equivalent in numeric tuning to the pre-runtime base stats because every growth multiplier is `1.0` at Lv1.
+- Tutorial logic is unchanged; fresh Tutorial Pets/Handlers remain at Lv1, so Tutorial combat tuning is preserved.
 
 ## Explicitly not included
 

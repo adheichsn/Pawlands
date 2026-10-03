@@ -23,6 +23,7 @@ local removingConnection
 local partyService
 local vitalsService
 local inventoryService
+local progressionService
 local stateByPlayer = {}
 local accumulator = 0
 local warnedMissingDamage = {}
@@ -171,19 +172,22 @@ local function damageForPet(player, uid)
 	local petId = pet and tostring(pet.PetId or "") or ""
 	local definition = petId ~= "" and Catalog.Pets[petId] or nil
 	local configured = definition and tonumber(definition.BaseDamage)
-	if configured and configured > 0 then
-		return math.max(1, math.floor(configured + 0.5))
+	local baseDamage = configured and configured > 0 and configured or nil
+
+	if not baseDamage then
+		local warningKey = petId ~= "" and petId or tostring(uid or "<unknown>")
+		if not warnedMissingDamage[warningKey] then
+			warn(string.format(
+				"[Pawlands PetCombat] Missing valid BaseDamage for %s; using safety fallback.",
+				warningKey
+			))
+			warnedMissingDamage[warningKey] = true
+		end
+		baseDamage = math.max(1, tonumber(Config.FallbackDamage) or 1)
 	end
 
-	local warningKey = petId ~= "" and petId or tostring(uid or "<unknown>")
-	if not warnedMissingDamage[warningKey] then
-		warn(string.format(
-			"[Pawlands PetCombat] Missing valid BaseDamage for %s; using safety fallback.",
-			warningKey
-		))
-		warnedMissingDamage[warningKey] = true
-	end
-	return math.max(1, math.floor((tonumber(Config.FallbackDamage) or 1) + 0.5))
+	local multiplier = progressionService and progressionService.GetDamageMultiplier(player, uid) or 1
+	return math.max(1, math.floor(baseDamage * multiplier + 0.5))
 end
 
 local function isActiveTarget(model, player)
@@ -556,15 +560,16 @@ function PetCombatService.GetCombatTargets(player)
 	return result
 end
 
-function PetCombatService.Start(petPartyService, petVitalsService, petInventoryService)
+function PetCombatService.Start(petPartyService, petVitalsService, petInventoryService, petProgressionService)
 	if started then
 		return
 	end
 	partyService = petPartyService
 	vitalsService = petVitalsService
 	inventoryService = petInventoryService
-	if not partyService or not vitalsService or not inventoryService then
-		error("PetCombatService requires PetPartyService, PetVitalsService, and PetInventoryService.")
+	progressionService = petProgressionService
+	if not partyService or not vitalsService or not inventoryService or not progressionService then
+		error("PetCombatService requires PetPartyService, PetVitalsService, PetInventoryService, and PetProgressionService.")
 	end
 	started = true
 	local impactRemote = ensureImpactRemote()
@@ -620,6 +625,7 @@ function PetCombatService.Stop()
 	partyService = nil
 	vitalsService = nil
 	inventoryService = nil
+	progressionService = nil
 	accumulator = 0
 	table.clear(warnedMissingDamage)
 end
