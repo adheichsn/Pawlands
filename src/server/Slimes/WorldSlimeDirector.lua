@@ -10,6 +10,11 @@ local WorldSlimeProfileRuntime = require(script.Parent.WorldSlimeProfileRuntime)
 
 local WorldSlimeDirector = {}
 
+local definitionById = {}
+for _, definition in ipairs(SlimeCatalog.Variants) do
+	definitionById[definition.Id] = definition
+end
+
 local function clonePath(path)
 	local copy = table.create(#path)
 	for index, value in ipairs(path) do
@@ -41,6 +46,47 @@ local function resolveRegionRootPath()
 		end
 	end
 	return nil
+end
+
+local function speciesIdForWorldIndex(worldIndex)
+	local scores = {}
+	local totalWeight = 0
+	for _, id in ipairs(WorldSlimeConfig.SpeciesOrder) do
+		local weight = math.max(0, tonumber(WorldSlimeConfig.SpeciesWeights[id]) or 0)
+		scores[id] = 0
+		totalWeight += weight
+	end
+	if totalWeight <= 0 then
+		return SlimeCatalog.Variants[1] and SlimeCatalog.Variants[1].Id or nil
+	end
+
+	local selectedId = nil
+	for _ = 1, math.max(1, math.floor(worldIndex or 1)) do
+		local bestScore = -math.huge
+		selectedId = nil
+		for _, id in ipairs(WorldSlimeConfig.SpeciesOrder) do
+			scores[id] += math.max(0, tonumber(WorldSlimeConfig.SpeciesWeights[id]) or 0)
+			if scores[id] > bestScore then
+				bestScore = scores[id]
+				selectedId = id
+			end
+		end
+		if selectedId then
+			scores[selectedId] -= totalWeight
+		end
+	end
+	return selectedId
+end
+
+local function spreadIndex(localIndex, capacity)
+	if capacity <= 1 then
+		return 1
+	end
+	local half = math.ceil(capacity / 2)
+	if localIndex % 2 == 1 then
+		return math.min(capacity, math.floor((localIndex + 1) / 2))
+	end
+	return math.min(capacity, half + math.floor(localIndex / 2))
 end
 
 function WorldSlimeDirector.ResolveRegions(runtimeFolder)
@@ -80,61 +126,67 @@ function WorldSlimeDirector.ResolveRegions(runtimeFolder)
 	return regions
 end
 
-local function distributePopulation(regions, requested)
-	local counts = table.create(#regions, 0)
-	if #regions <= 0 then
-		return counts, 0
+function WorldSlimeDirector.GetCapacity(regions)
+	local capacity = 0
+	for _, region in ipairs(regions) do
+		capacity += #region.Zone.Points
 	end
-
-	local remaining = math.max(0, math.floor(tonumber(requested) or 0))
-	local assigned = 0
-	while remaining > 0 do
-		local progressed = false
-		for index, region in ipairs(regions) do
-			if remaining <= 0 then
-				break
-			end
-			if counts[index] < #region.Zone.Points then
-				counts[index] += 1
-				remaining -= 1
-				assigned += 1
-				progressed = true
-			end
-		end
-		if not progressed then
-			break
-		end
-	end
-	return counts, assigned
+	return math.min(WorldSlimeConfig.MaxPopulation, capacity)
 end
 
-function WorldSlimeDirector.BuildSpawnPlan(regions)
-	local counts, total = distributePopulation(regions, WorldSlimeConfig.Population)
-	if total <= 0 then
-		return {}
+function WorldSlimeDirector.BuildSpawnSpec(regions, worldIndex)
+	if #regions <= 0 then
+		return nil
+	end
+	worldIndex = math.max(1, math.floor(tonumber(worldIndex) or 1))
+	if worldIndex > WorldSlimeDirector.GetCapacity(regions) then
+		return nil
 	end
 
-	local plan = table.create(total)
-	local worldIndex = 0
-	for regionIndex, region in ipairs(regions) do
-		local count = counts[regionIndex]
-		local positions = region.Zone:GetInsetSpawnPositions(count, regionIndex * 13)
-		for localIndex = 1, count do
-			worldIndex += 1
-			local definitionIndex = ((worldIndex - 1) % #SlimeCatalog.Variants) + 1
-			local definition = SlimeCatalog.Variants[definitionIndex]
-			local profile = WorldSlimeProfileRuntime.Resolve(definition)
-			table.insert(plan, {
-				Slot = WorldSlimeConfig.SlotBase + worldIndex,
-				Definition = definition,
-				Profile = profile,
-				MovementConfig = WorldSlimeProfileRuntime.BuildMovementConfig(
-					region.MovementConfig,
-					profile
-				),
-				Region = region,
-				Position = positions[localIndex],
-			})
+	local regionIndex = ((worldIndex - 1) % #regions) + 1
+	local localIndex = math.floor((worldIndex - 1) / #regions) + 1
+	local region = regions[regionIndex]
+	local maximumSlotsInRegion = math.min(
+		#region.Zone.Points,
+		math.ceil(WorldSlimeConfig.MaxPopulation / #regions)
+	)
+	if localIndex > maximumSlotsInRegion then
+		return nil
+	end
+
+	local authoredPositions = region.Zone:GetInsetSpawnPositions(maximumSlotsInRegion, regionIndex * 13)
+	local positionIndex = spreadIndex(localIndex, #authoredPositions)
+	local speciesId = speciesIdForWorldIndex(worldIndex)
+	local definition = (speciesId and definitionById[speciesId]) or SlimeCatalog.Variants[1]
+	if not definition then
+		return nil
+	end
+	local profile = WorldSlimeProfileRuntime.Resolve(definition)
+
+	return {
+		WorldIndex = worldIndex,
+		Slot = WorldSlimeConfig.SlotBase + worldIndex,
+		Definition = definition,
+		Profile = profile,
+		MovementConfig = WorldSlimeProfileRuntime.BuildMovementConfig(
+			region.MovementConfig,
+			profile
+		),
+		Region = region,
+		Position = authoredPositions[positionIndex],
+	}
+end
+
+function WorldSlimeDirector.BuildSpawnPlan(regions, requestedPopulation)
+	local count = math.min(
+		math.max(0, math.floor(tonumber(requestedPopulation) or 0)),
+		WorldSlimeDirector.GetCapacity(regions)
+	)
+	local plan = table.create(count)
+	for worldIndex = 1, count do
+		local spec = WorldSlimeDirector.BuildSpawnSpec(regions, worldIndex)
+		if spec then
+			table.insert(plan, spec)
 		end
 	end
 	return plan
@@ -145,10 +197,12 @@ function WorldSlimeDirector.TagAgent(agent, region)
 	agent.RuntimeZone = region.Zone
 	agent.RuntimeRegionId = region.Id
 
+	local worldIndex = math.max(0, agent.Slot - WorldSlimeConfig.SlotBase)
 	local model = agent.Model
 	model:SetAttribute("TutorialEncounter", false)
 	model:SetAttribute("WorldCombat", true)
 	model:SetAttribute("WorldRegionId", region.Id)
+	model:SetAttribute("WorldPopulationIndex", worldIndex)
 end
 
 return WorldSlimeDirector

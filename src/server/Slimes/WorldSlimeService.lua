@@ -5,7 +5,6 @@ local Workspace = game:GetService("Workspace")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local MovementConfig = require(Shared.Config.SlimeMovement)
 local CombatConfig = require(Shared.Config.SlimeCombat)
-local LifecycleConfig = require(Shared.Config.SlimeLifecycle)
 local WorldSlimeConfig = require(Shared.Config.WorldSlime)
 
 local SlimeAgent = require(script.Parent.SlimeAgent)
@@ -13,10 +12,11 @@ local SlimeAttackRuntime = require(script.Parent.SlimeAttackRuntime)
 local SlimeAttackScheduler = require(script.Parent.SlimeAttackScheduler)
 local SlimeFactory = require(script.Parent.SlimeFactory)
 local SlimeHealth = require(script.Parent.SlimeHealth)
-local SlimeLifecycle = require(script.Parent.SlimeLifecycle)
 local SlimeTargeting = require(script.Parent.SlimeTargeting)
 local WorldSlimeDirector = require(script.Parent.WorldSlimeDirector)
+local WorldSlimeLifecycleRuntime = require(script.Parent.WorldSlimeLifecycleRuntime)
 local WorldSlimeMotionRuntime = require(script.Parent.WorldSlimeMotionRuntime)
+local WorldSlimePopulationRuntime = require(script.Parent.WorldSlimePopulationRuntime)
 local WorldSlimeProfileRuntime = require(script.Parent.WorldSlimeProfileRuntime)
 local WorldSlimeTargetRuntime = require(script.Parent.WorldSlimeTargetRuntime)
 
@@ -31,6 +31,13 @@ local pendingRespawns = {}
 local formationStateByPlayer = {}
 local randomObject = Random.new()
 local filterRefreshAt = 0
+local populationRefreshAt = 0
+local populationFillAt = 0
+local populationWarnAt = 0
+local populationSpawnSerial = 0
+local activeStonewoodPlayers = 0
+local targetPopulation = WorldSlimeConfig.Population
+local populationCapacity = WorldSlimeConfig.MaxPopulation
 local accumulator = 0
 
 local petCombatService = nil
@@ -82,6 +89,46 @@ local function agentsInZone(runtimeZone)
 	return result
 end
 
+local function spawnSpec(spec, now)
+	if not spec or not spec.Region then
+		return nil, false, "invalid_spawn_spec"
+	end
+
+	populationSpawnSerial += 1
+	local seed = (spec.Slot * 37) + (populationSpawnSerial * 53)
+	local spawnPosition, safeReason = WorldSlimePopulationRuntime.ResolveSafeSpawnPosition(
+		spec.Region.Zone,
+		agents,
+		seed,
+		spec.Position,
+		nil
+	)
+	if not spawnPosition then
+		return nil, false, safeReason
+	end
+
+	local visual, reason = SlimeFactory.Create(spec.Definition, spec.Slot, runtimeFolder)
+	if not visual then
+		return nil, false, reason
+	end
+
+	visual.Model:SetAttribute("RespawnGeneration", 0)
+	visual.Model:SetAttribute("RespawnPending", false)
+	local agent = SlimeAgent.new(
+		spec.Slot,
+		spec.Definition,
+		visual,
+		spawnPosition,
+		spec.MovementConfig or spec.Region.MovementConfig
+	)
+	WorldSlimeProfileRuntime.Attach(agent, spec.Profile)
+	WorldSlimeDirector.TagAgent(agent, spec.Region)
+	agent:EnterIdle(now, randomObject)
+	agent:Step(agent.Position, 0, agents, spec.Region.Zone, 0.001)
+	table.insert(agents, agent)
+	return agent, visual.Animation and visual.Animation:HasAuthoredLoop() == true, nil
+end
+
 local function retireDefeatedAgents(now)
 	for index = #agents, 1, -1 do
 		local agent = agents[index]
@@ -96,7 +143,13 @@ local function retireDefeatedAgents(now)
 				agent.Visual.Animation:SetMoving(false)
 			end
 
-			local lifecycle = SlimeLifecycle.Begin(agent, now, LifecycleConfig, true)
+			local worldIndex = WorldSlimePopulationRuntime.WorldIndexFromSlot(agent.Slot)
+			local lifecycle = WorldSlimeLifecycleRuntime.Begin(
+				agent,
+				now,
+				randomObject,
+				worldIndex >= 1 and worldIndex <= targetPopulation
+			)
 			lifecycle.RuntimeZone = zoneFor(agent)
 			lifecycle.RuntimeRegionId = agent.RuntimeRegionId
 			lifecycle.MovementConfig = agent.Config or MovementConfig
@@ -110,16 +163,18 @@ end
 local function processPendingRespawns(now)
 	for index = #pendingRespawns, 1, -1 do
 		local lifecycle = pendingRespawns[index]
+		local worldIndex = WorldSlimePopulationRuntime.WorldIndexFromSlot(lifecycle.Slot)
+		lifecycle.AllowRespawn = worldIndex >= 1 and worldIndex <= targetPopulation
+
 		local runtimeZone = lifecycle.RuntimeZone
 		local movementConfig = lifecycle.MovementConfig or MovementConfig
-		local replacement, finished, reason = SlimeLifecycle.Update(
+		local replacement, finished, reason = WorldSlimeLifecycleRuntime.Update(
 			lifecycle,
 			now,
 			runtimeZone,
 			agentsInZone(runtimeZone),
 			runtimeFolder,
-			movementConfig,
-			LifecycleConfig
+			movementConfig
 		)
 
 		if reason and now >= (lifecycle.NextWarnAt or 0) then
@@ -140,6 +195,7 @@ local function processPendingRespawns(now)
 				replacement.Model:SetAttribute("TutorialEncounter", false)
 				replacement.Model:SetAttribute("WorldCombat", true)
 				replacement.Model:SetAttribute("WorldRegionId", lifecycle.RuntimeRegionId or "")
+				replacement.Model:SetAttribute("WorldPopulationIndex", worldIndex)
 			end
 			table.insert(agents, replacement)
 			if RunService:IsStudio() then
@@ -184,6 +240,67 @@ local function refreshGroundFilters()
 	end
 end
 
+local function refreshPopulationTarget(now, force)
+	if not force and now < populationRefreshAt then
+		return
+	end
+	populationRefreshAt = now + math.max(0.25, WorldSlimeConfig.PopulationRefreshSeconds or 1)
+
+	local previousPlayers = activeStonewoodPlayers
+	local previousTarget = targetPopulation
+	activeStonewoodPlayers = WorldSlimePopulationRuntime.CountActivePlayers(regions)
+	targetPopulation = math.min(
+		populationCapacity,
+		WorldSlimePopulationRuntime.ResolveTargetPopulation(activeStonewoodPlayers)
+	)
+
+	if RunService:IsStudio() and (previousPlayers ~= activeStonewoodPlayers or previousTarget ~= targetPopulation) then
+		print(string.format(
+			"[Pawlands WorldSlimes] Stonewood population target %d -> %d for %d active player(s).",
+			previousTarget,
+			targetPopulation,
+			activeStonewoodPlayers
+		))
+	end
+end
+
+local function fillPopulation(now)
+	if now < populationFillAt then
+		return
+	end
+	local worldIndex = WorldSlimePopulationRuntime.FindMissingWorldIndex(
+		agents,
+		pendingRespawns,
+		targetPopulation
+	)
+	if not worldIndex then
+		return
+	end
+
+	populationFillAt = now + math.max(0.1, WorldSlimeConfig.PopulationFillIntervalSeconds or 0.75)
+	local spec = WorldSlimeDirector.BuildSpawnSpec(regions, worldIndex)
+	if not spec then
+		return
+	end
+
+	local agent, _, reason = spawnSpec(spec, now)
+	if agent then
+		if RunService:IsStudio() then
+			print(string.format(
+				"[Pawlands WorldSlimes] Filled world slot %d with %s in %s (%d/%d target).",
+				worldIndex,
+				tostring(agent.Model:GetAttribute("SlimeId") or agent.Model.Name),
+				tostring(agent.RuntimeRegionId),
+				#agents,
+				targetPopulation
+			))
+		end
+	elseif reason and now >= populationWarnAt then
+		populationWarnAt = now + 5
+		warn("[Pawlands WorldSlimes] Population fill waiting: " .. tostring(reason))
+	end
+end
+
 local function step(dt)
 	local now = time()
 	pruneOrphanedAgents(now)
@@ -192,8 +309,10 @@ local function step(dt)
 		refreshGroundFilters()
 	end
 
+	refreshPopulationTarget(now, false)
 	retireDefeatedAgents(now)
 	processPendingRespawns(now)
+	fillPopulation(now)
 
 	local context = runtimeContext()
 	WorldSlimeTargetRuntime.UpdateStates(context, now)
@@ -203,52 +322,25 @@ local function step(dt)
 	end
 end
 
-local function spawnInitialPopulation()
-	local plan = WorldSlimeDirector.BuildSpawnPlan(regions)
+local function spawnInitialPopulation(now)
+	local plan = WorldSlimeDirector.BuildSpawnPlan(regions, targetPopulation)
 	local spawnedCount = 0
 	local authoredLoopCount = 0
 
 	for _, spec in ipairs(plan) do
-		local region = spec.Region
-		local runtimeZone = region.Zone
-		local spawnPosition = spec.Position
-		local grounded = spawnPosition and runtimeZone:GroundPoint(spawnPosition)
-		if grounded then
-			spawnPosition = grounded
-		end
-		if not spawnPosition then
+		local agent, authoredLoop, reason = spawnSpec(spec, now)
+		if agent then
+			spawnedCount += 1
+			if authoredLoop then
+				authoredLoopCount += 1
+			end
+		elseif reason then
 			warn(string.format(
-				"[Pawlands WorldSlimes] Could not ground slot %d in %s.",
-				spec.Slot,
-				region.Id
+				"[Pawlands WorldSlimes] Initial slot %d waiting: %s",
+				spec.WorldIndex,
+				tostring(reason)
 			))
-			continue
 		end
-
-		local visual, reason = SlimeFactory.Create(spec.Definition, spec.Slot, runtimeFolder)
-		if not visual then
-			warn("[Pawlands WorldSlimes] " .. tostring(reason))
-			continue
-		end
-		if visual.Animation and visual.Animation:HasAuthoredLoop() then
-			authoredLoopCount += 1
-		end
-
-		visual.Model:SetAttribute("RespawnGeneration", 0)
-		visual.Model:SetAttribute("RespawnPending", false)
-		local agent = SlimeAgent.new(
-			spec.Slot,
-			spec.Definition,
-			visual,
-			spawnPosition,
-			spec.MovementConfig or region.MovementConfig
-		)
-		WorldSlimeProfileRuntime.Attach(agent, spec.Profile)
-		WorldSlimeDirector.TagAgent(agent, region)
-		agent:EnterIdle(time(), randomObject)
-		agent:Step(agent.Position, 0, agents, runtimeZone, 0.001)
-		table.insert(agents, agent)
-		spawnedCount += 1
 	end
 
 	return spawnedCount, authoredLoopCount
@@ -282,9 +374,16 @@ function WorldSlimeService.Start(petCombat, petVitals, petCombatFeedback)
 		return
 	end
 
+	populationCapacity = WorldSlimeDirector.GetCapacity(regions)
+	targetPopulation = math.min(WorldSlimeConfig.Population, populationCapacity)
+	activeStonewoodPlayers = 0
+	local now = time()
+	refreshPopulationTarget(now, true)
+
 	running = true
-	local spawnedCount, authoredLoopCount = spawnInitialPopulation()
+	local spawnedCount, authoredLoopCount = spawnInitialPopulation(now)
 	refreshGroundFilters()
+	populationFillAt = now + math.max(0.1, WorldSlimeConfig.PopulationFillIntervalSeconds or 0.75)
 
 	local interval = 1 / MovementConfig.UpdateRate
 	heartbeatConnection = RunService.Heartbeat:Connect(function(dt)
@@ -296,10 +395,11 @@ function WorldSlimeService.Start(petCombat, petVitals, petCombatFeedback)
 	end)
 
 	print(string.format(
-		"[Pawlands WorldSlimes] Stonewood runtime ready with %d/%d slime(s) across %d region(s) and %d authored animation loop(s).",
+		"[Pawlands WorldSlimes] Stonewood runtime ready with %d/%d slime(s) across %d region(s), %d active player(s), and %d authored animation loop(s).",
 		spawnedCount,
-		WorldSlimeConfig.Population,
+		targetPopulation,
 		#regions,
+		activeStonewoodPlayers,
 		authoredLoopCount
 	))
 end
@@ -323,7 +423,7 @@ function WorldSlimeService.Stop()
 		SlimeFactory.Destroy(agent.Visual)
 	end
 	for _, lifecycle in ipairs(pendingRespawns) do
-		SlimeLifecycle.Cancel(lifecycle)
+		WorldSlimeLifecycleRuntime.Cancel(lifecycle)
 	end
 
 	table.clear(agents)
@@ -336,6 +436,13 @@ function WorldSlimeService.Stop()
 	petVitalsService = nil
 	petCombatFeedbackService = nil
 	filterRefreshAt = 0
+	populationRefreshAt = 0
+	populationFillAt = 0
+	populationWarnAt = 0
+	populationSpawnSerial = 0
+	activeStonewoodPlayers = 0
+	targetPopulation = WorldSlimeConfig.Population
+	populationCapacity = WorldSlimeConfig.MaxPopulation
 	accumulator = 0
 end
 

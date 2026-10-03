@@ -2,7 +2,7 @@
 
 ## Scope
 
-Stonewood now has a live, continuous Slime grinding runtime that is separate from the frozen tutorial encounter.
+Stonewood has a live, continuous Slime grinding runtime that is separate from the frozen tutorial encounter.
 
 Studio authoring remains the source of placement truth:
 
@@ -19,13 +19,11 @@ Workspace
             └─ Points x8
 ```
 
-The current place still uses the equivalent legacy wrapper:
+The runtime also accepts the equivalent legacy wrapper:
 
 ```text
 StonewoodIsland > Combat > Zones > Zones > Region01/02/03
 ```
-
-`WorldSlimeDirector` accepts either hierarchy so no additional Studio edit is required for this patch.
 
 ## Runtime contract
 
@@ -33,30 +31,74 @@ StonewoodIsland > Combat > Zones > Zones > Region01/02/03
 - Stonewood combat runs under the separate `WorldSlimeService`.
 - Both runtimes reuse the same Slime combat modules, models, health, targeting, navigation, attack runtime, Player M1, Pet combat, VFX, SFX, and healthbars.
 - Both publish managed Slimes into the existing `Workspace/PawlandsSlimes` folder so existing Player/Pet combat validation continues to work.
-- Stonewood Slimes use unique slots starting above the tutorial range.
 - World Slimes are tagged with:
   - `WorldCombat = true`
   - `WorldRegionId = Region01/02/03`
+  - `WorldPopulationIndex = 1..16`
   - `TutorialEncounter = false`
-- The initial QA population is 8 total Slimes distributed across the three authored regions.
-- A defeated Stonewood Slime uses the existing defeat presentation and respawns continuously after the existing lifecycle delay.
-- Respawn chooses a safe inset position from the same authored region rather than a fixed death location.
-- Stonewood aggro is finite and profile-driven instead of tutorial-wide aggro. Goopy keeps the `24` / `36` baseline while Fin, Sunset, and Derpy override it through 4A.0.1 world profiles.
-- There are no Coins, Diamonds, Player EXP, Pet EXP, loot, boss, challenge, or chest rewards in this patch.
+- Stonewood aggro and combat identity remain profile-driven through `WorldSlimeProfiles`.
+- There are still no Coins, Diamonds, Player EXP, Pet EXP, loot, boss, challenge, or chest rewards in this stage.
+
+## 4A.0.3 population scaling
+
+Population uses only living Players whose HumanoidRootPart is inside one of the authored Stonewood combat regions. Seabreeze Players do not increase the target.
+
+| Active Stonewood Players | Target Slimes |
+| ---: | ---: |
+| 0-1 | 8 |
+| 2-3 | 10 |
+| 4-6 | 12 |
+| 7-10 | 14 |
+| 11-16+ | 16 |
+
+The target is capped by available authored region capacity. Population increases are filled gradually rather than bursting all missing Slimes in one frame. When the target decreases, living excess Slimes are not deleted in front of Players; their slots naturally stop respawning after they are defeated until population returns to target.
+
+## Species composition
+
+World population slots use deterministic smooth weighted distribution:
+
+- Goopy: 45%
+- Fin: 25%
+- Sunset: 20%
+- Derpy: 10%
+
+The species is tied to the population slot, so a defeated slot respawns as the same species instead of rerolling every death.
+
+At the current targets this produces approximately:
+
+| Target | Goopy | Fin | Sunset | Derpy |
+| ---: | ---: | ---: | ---: | ---: |
+| 8 | 4 | 2 | 1 | 1 |
+| 10 | 5 | 2 | 2 | 1 |
+| 12 | 6 | 3 | 2 | 1 |
+| 14 | 6 | 4 | 3 | 1 |
+| 16 | 7 | 4 | 3 | 2 |
+
+## Spawn and respawn safety
+
+- Region allocation is stable and round-robin across Region01/02/03.
+- Studio `Points` remain boundary/sampling authoring, not fixed exact spawn slots.
+- New population searches grounded inset candidates before creating a model.
+- A candidate must be at least 24 studs from a living Player.
+- A candidate must be at least 8 studs from another live Slime.
+- A candidate must be at least 18 studs from a Slime currently in Notice/Chase/Engage/Attack, preventing new population from appearing directly inside an active fight.
+- Defeated world Slimes respawn after a randomized 4-7 second delay, after the existing defeat presentation.
+- Respawns also avoid the previous death position by at least 6 studs.
+- If no safe candidate exists, the slot waits and retries instead of forcing an unsafe spawn.
 
 ## Tutorial freeze
 
-No TutorialService, tutorial stage, tutorial spawn flow, dialogue flow, cue, arrow, or tutorial completion presentation is changed by 4A.0.
-
+`TutorialService`, tutorial stages, tutorial 1 -> +2 spawn flow, dialogue, cue, arrow, completion presentation, and tutorial lifecycle configuration are unchanged by 4A.0.3.
 
 ## QA
 
-1. Join and verify Stonewood creates 8 managed Slimes total.
-2. Verify Slimes are distributed across Region01/02/03 rather than stacked at one Point.
-3. Walk near a Stonewood Slime; it should use the existing notice/chase/engage/attack foundation with its Stonewood species profile applied.
-4. Equip Pets; Pet targeting, Pet damage, Slime-to-Pet targeting, KO/recovery, and Player assist should behave like the existing combat baseline.
-5. Kill a Stonewood Slime; after the normal defeat hold + respawn delay, it should reappear at a safe position in the same region.
-6. Move away beyond disengage range; the Slime should return toward its home area instead of following across the island indefinitely.
-7. Complete the existing Seabreeze tutorial in the same server and verify its scripted 1 → +2 encounter still behaves unchanged while Stonewood Slimes remain alive.
-8. Verify Tutorial completion does not remove Stonewood Slimes.
-9. Verify there are no normal rewards yet.
+1. With 1 Player in Stonewood, verify the target remains 8 Slimes.
+2. Add enough Players inside Stonewood regions to cross 2-3 / 4-6 / 7-10 / 11-16 tiers and verify the target moves 10 / 12 / 14 / 16 gradually.
+3. Keep Players in Seabreeze and verify they do not increase Stonewood population.
+4. Verify population remains distributed across Region01/02/03 rather than stacking in one region.
+5. Verify the 8-Slime baseline is approximately Goopy x4, Fin x2, Sunset x1, Derpy x1.
+6. Kill world Slimes repeatedly and verify each slot preserves its species/profile on respawn.
+7. Verify respawn delay varies between roughly 4 and 7 seconds after the defeat hold.
+8. Fight near one authored sample area and verify a new/respawned Slime waits if there is no safe candidate away from Players and the active fight.
+9. Reduce the active Stonewood player count after scaling up. Existing excess Slimes should not suddenly disappear; defeated excess slots should stop refilling until the target is met.
+10. Complete the Seabreeze tutorial and verify its scripted encounter remains unchanged.
