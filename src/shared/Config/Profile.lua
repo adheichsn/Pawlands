@@ -1,5 +1,5 @@
 return table.freeze({
-	SchemaVersion = 1,
+	SchemaVersion = 2,
 	DataStoreName = "PawlandsPlayerProfiles",
 	KeyPrefix = "Player_",
 

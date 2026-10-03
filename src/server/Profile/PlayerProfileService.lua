@@ -5,6 +5,7 @@ local RunService = game:GetService("RunService")
 local Shared = ReplicatedStorage:WaitForChild("Pawlands"):WaitForChild("Shared")
 local Config = require(Shared.Config.Profile)
 local TutorialConfig = require(Shared.Config.Tutorial)
+local EconomyConfig = require(Shared.Config.Economy)
 local Schema = require(script.Parent.ProfileSchema)
 local Store = require(script.Parent.ProfileStore)
 
@@ -266,6 +267,11 @@ function PlayerProfileService.GetHandlerSnapshot(player)
 	return profile and table.clone(profile.Handler) or nil
 end
 
+function PlayerProfileService.GetEconomySnapshot(player)
+	local profile = PlayerProfileService.GetSnapshot(player)
+	return profile and Schema.DeepCopy(profile.Economy) or nil
+end
+
 function PlayerProfileService.AddPet(player, pet, nextSequence)
 	return mutate(player, function(profile)
 		if type(pet) ~= "table" or type(pet.Uid) ~= "string" or pet.Uid == "" then
@@ -362,6 +368,36 @@ function PlayerProfileService.SetHandlerProgression(player, level, experience)
 		end
 		profile.Handler.Level = nextLevel
 		profile.Handler.Experience = nextExperience
+		return true
+	end)
+end
+
+function PlayerProfileService.SetEconomyBalance(player, resourceId, balance)
+	local definition = type(resourceId) == "string" and EconomyConfig.Resources[resourceId] or nil
+	if not definition then
+		return false, "Unknown economy resource: " .. tostring(resourceId)
+	end
+	local numericBalance = tonumber(balance)
+	if not numericBalance
+		or numericBalance ~= numericBalance
+		or numericBalance == math.huge
+		or numericBalance == -math.huge
+		or numericBalance ~= math.floor(numericBalance)
+		or numericBalance < 0
+		or numericBalance > EconomyConfig.MaxBalance
+	then
+		return false, "Economy balance is outside the supported integer range."
+	end
+
+	return mutate(player, function(profile)
+		local section = profile.Economy and profile.Economy[definition.Section]
+		if type(section) ~= "table" then
+			return nil, "Economy profile section is missing: " .. tostring(definition.Section)
+		end
+		if section[resourceId] == numericBalance then
+			return false
+		end
+		section[resourceId] = numericBalance
 		return true
 	end)
 end

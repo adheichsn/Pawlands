@@ -41,6 +41,9 @@ local function inspect(player, profileService)
 	local order = pets.Order or {}
 	local records = pets.Records or {}
 	local handler = profile.Handler or {}
+	local economy = profile.Economy or {}
+	local currencies = economy.Currencies or {}
+	local materials = economy.Materials or {}
 	local tutorial = profile.Tutorial or {}
 	local persistent = player:GetAttribute(ProfileConfig.PersistentAttributeName) == true
 
@@ -56,6 +59,12 @@ local function inspect(player, profileService)
 		math.floor(tonumber(pets.NextSequence) or 0) + 1
 	))
 	print("[Pawlands Profile] Party: " .. formatParty(profile))
+	print(string.format(
+		"[Pawlands Profile] Economy: Coins=%d Diamonds=%d SlimeCore=%d",
+		math.floor(tonumber(currencies.Coins) or 0),
+		math.floor(tonumber(currencies.Diamonds) or 0),
+		math.floor(tonumber(materials.SlimeCore) or 0)
+	))
 	print(string.format(
 		"[Pawlands Profile] Tutorial: stage=%s starterGranted=%s starterUid=%s starterSpecies=%s petHit=%s",
 		tostring(tutorial.Stage or ""),

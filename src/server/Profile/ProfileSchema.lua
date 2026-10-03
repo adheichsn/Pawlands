@@ -7,6 +7,7 @@ local PetPartyConfig = require(Shared.Config.PetParty)
 local PetCatalog = require(Shared.Config.PetCatalog)
 local PetProgressionConfig = require(Shared.Config.PetProgression)
 local HandlerProgressionConfig = require(Shared.Config.HandlerProgression)
+local EconomyConfig = require(Shared.Config.Economy)
 local TutorialConfig = require(Shared.Config.Tutorial)
 local ProgressionMath = require(Shared.Progression.ProgressionMath)
 
@@ -53,6 +54,15 @@ function ProfileSchema.NewData()
 		Handler = {
 			Level = HandlerProgressionConfig.InitialLevel,
 			Experience = 0,
+		},
+		Economy = {
+			Currencies = {
+				Coins = 0,
+				Diamonds = 0,
+			},
+			Materials = {
+				SlimeCore = 0,
+			},
 		},
 		Pets = {
 			NextSequence = 0,
@@ -188,6 +198,20 @@ local function normalizeTutorial(rawTutorial, pets)
 	}
 end
 
+local function normalizeEconomy(rawEconomy)
+	rawEconomy = type(rawEconomy) == "table" and rawEconomy or {}
+	local result = {
+		Currencies = {},
+		Materials = {},
+	}
+	for resourceId, definition in pairs(EconomyConfig.Resources) do
+		local rawSection = type(rawEconomy[definition.Section]) == "table" and rawEconomy[definition.Section] or {}
+		local balance = math.min(EconomyConfig.MaxBalance, finiteNonNegative(rawSection[resourceId]))
+		result[definition.Section][resourceId] = balance
+	end
+	return result
+end
+
 function ProfileSchema.NormalizeData(rawData)
 	rawData = type(rawData) == "table" and rawData or {}
 	local data = ProfileSchema.NewData()
@@ -197,6 +221,7 @@ function ProfileSchema.NormalizeData(rawData)
 
 	data.Handler.Level = handlerResolved.Level
 	data.Handler.Experience = handlerResolved.TotalExperience
+	data.Economy = normalizeEconomy(rawData.Economy)
 	data.Pets = pets
 	data.Party = normalizeParty(rawData.Party, pets)
 	data.Tutorial = normalizeTutorial(rawData.Tutorial, pets)
@@ -224,9 +249,9 @@ function ProfileSchema.NormalizeRecord(rawRecord)
 		)
 	end
 
-	-- v0 is the migration bridge for any pre-versioned/internal test record. There
-	-- was no released persistent schema before v1, so normalize known fields and
-	-- fill every missing field from the v1 defaults.
+	-- v0 is the migration bridge for pre-versioned/internal test records.
+	-- Schema v2 adds Economy; NormalizeData fills missing v1 economy fields with
+	-- zero balances while preserving Handler, Pet, party, and Tutorial progress.
 	local sourceData
 	if version <= 0 then
 		sourceData = type(rawRecord.Data) == "table" and rawRecord.Data or rawRecord
