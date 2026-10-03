@@ -25,7 +25,17 @@ local function getState(player)
 	return state
 end
 
+local function normalizeProgression(pet)
+	if not pet then
+		return nil
+	end
+	pet.Level = math.max(1, math.floor(tonumber(pet.Level) or 1))
+	pet.Experience = math.max(0, math.floor((tonumber(pet.Experience) or 0) + 0.5))
+	return pet
+end
+
 local function clonePet(pet)
+	pet = normalizeProgression(pet)
 	return pet and table.clone(pet) or nil
 end
 
@@ -74,6 +84,31 @@ function PetInventoryService.ToggleFavorite(player, uid)
 	return clonePet(pet), nil
 end
 
+-- Trusted server-only mutation point for progression services.
+function PetInventoryService.SetProgressionState(player, uid, level, experience)
+	local state = getState(player)
+	local pet = state and state.Pets[uid]
+	if not pet then
+		return nil, "Pet is not owned: " .. tostring(uid)
+	end
+	local nextLevel = tonumber(level)
+	local nextExperience = tonumber(experience)
+	if not nextLevel or nextLevel ~= nextLevel or nextLevel == math.huge or nextLevel == -math.huge then
+		return nil, "Pet level must be a finite number."
+	end
+	if not nextExperience
+		or nextExperience ~= nextExperience
+		or nextExperience == math.huge
+		or nextExperience == -math.huge
+		or nextExperience < 0
+	then
+		return nil, "Pet experience must be a finite non-negative number."
+	end
+	pet.Level = math.max(1, math.floor(nextLevel))
+	pet.Experience = math.max(0, math.floor(nextExperience + 0.5))
+	return clonePet(pet), nil
+end
+
 -- Session-only grant API. Persistence and hatch acquisition are intentionally not part of this patch.
 function PetInventoryService.Grant(player, requestedPet, variant)
 	if not validPlayer(player) then
@@ -99,6 +134,8 @@ function PetInventoryService.Grant(player, requestedPet, variant)
 		SpeciesId = definition.SpeciesId,
 		Variant = variant or "Normal",
 		Favorite = false,
+		Level = 1,
+		Experience = 0,
 	}
 	state.Pets[uid] = pet
 	table.insert(state.Order, uid)

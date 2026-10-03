@@ -52,6 +52,8 @@ local function cleanPet(pet)
 		SpeciesId = pet.SpeciesId,
 		Variant = pet.Variant,
 		Favorite = pet.Favorite == true,
+		Level = math.max(1, math.floor(tonumber(pet.Level) or 1)),
+		Experience = math.max(0, math.floor((tonumber(pet.Experience) or 0) + 0.5)),
 	}
 end
 
